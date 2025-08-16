@@ -7,6 +7,8 @@ dataclasses-json>=0.5.7
 fastapi>=0.68.0
 uvicorn>=0.15.0
 pydantic>=1.8.0
+httpx>=0.23.0
+PyJWT>=2.0.0
 
 # Database and storage
 sqlalchemy>=1.4.0
