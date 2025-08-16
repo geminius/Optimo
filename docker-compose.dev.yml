@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # Override API service for development
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-robotics_optimization}
+      - REDIS_URL=redis://redis:6379
+      - ENVIRONMENT=development
+      - DEBUG=true
+    volumes:
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./uploads:/app/uploads
+      - ./test_results:/app/test_results
+    command: ["python", "-m", "uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    ports:
+      - "8000:8000"
+
+  # Override worker for development
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-robotics_optimization}
+      - REDIS_URL=redis://redis:6379
+      - ENVIRONMENT=development
+      - DEBUG=true
+    volumes:
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./uploads:/app/uploads
+      - ./test_results:/app/test_results
+    deploy:
+      replicas: 1
+
+  # Override frontend for development
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: build
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_WS_URL=ws://localhost:8000
+      - NODE_ENV=development
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    command: ["npm", "start"]
+    ports:
+      - "3000:3000"
+
+  # Development database with exposed port
+  db:
+    ports:
+      - "5432:5432"
+
+  # Development Redis with exposed port  
+  redis:
+    ports:
+      - "6379:6379"

@@ -1,0 +1,38 @@
+{
+  "name": "default",
+  "description": "Default optimization criteria for robotics models",
+  "performance_thresholds": [
+    {
+      "metric": "accuracy",
+      "min_value": 0.90,
+      "tolerance": 0.05
+    },
+    {
+      "metric": "inference_time",
+      "max_value": 100.0,
+      "tolerance": 0.10
+    },
+    {
+      "metric": "model_size",
+      "max_value": 1000.0,
+      "tolerance": 0.20
+    }
+  ],
+  "constraints": {
+    "max_optimization_time_minutes": 60,
+    "max_memory_usage_gb": 16.0,
+    "preserve_accuracy_threshold": 0.95,
+    "allowed_techniques": ["quantization", "pruning", "distillation"],
+    "forbidden_techniques": [],
+    "hardware_constraints": {
+      "gpu_memory_gb": 8.0,
+      "cpu_cores": 4
+    }
+  },
+  "priority_weights": {
+    "accuracy": 0.4,
+    "inference_time": 0.3,
+    "model_size": 0.3
+  },
+  "target_deployment": "general"
+}

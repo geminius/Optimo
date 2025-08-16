@@ -1,0 +1,421 @@
+"""
+Integration tests for the REST API.
+"""
+
+import pytest
+import tempfile
+import json
+import os
+from pathlib import Path
+from fastapi.testclient import TestClient
+from unittest.mock import Mock, patch
+
+# Import the FastAPI app
+from src.api.main import app
+from src.services.optimization_manager import OptimizationManager
+
+
+@pytest.fixture
+def client():
+    """Create test client."""
+    return TestClient(app)
+
+
+@pytest.fixture
+def auth_token(client):
+    """Get authentication token for tests."""
+    response = client.post("/auth/login", json={
+        "username": "admin",
+        "password": "admin"
+    })
+    assert response.status_code == 200
+    return response.json()["access_token"]
+
+
+@pytest.fixture
+def auth_headers(auth_token):
+    """Get authorization headers."""
+    return {"Authorization": f"Bearer {auth_token}"}
+
+
+@pytest.fixture
+def mock_optimization_manager():
+    """Mock optimization manager for testing."""
+    mock_manager = Mock(spec=OptimizationManager)
+    mock_manager.get_active_sessions.return_value = []
+    mock_manager.get_session_status.return_value = {
+        "status": "running",
+        "progress_percentage": 50.0,
+        "current_step": "Analyzing model",
+        "start_time": "2024-01-01T00:00:00",
+        "last_update": "2024-01-01T00:30:00",
+        "error_message": None,
+        "session_data": {
+            "model_id": "test-model",
+            "steps_completed": 2
+        }
+    }
+    mock_manager.start_optimization_session.return_value = "test-session-id"
+    mock_manager.cancel_session.return_value = True
+    mock_manager.rollback_session.return_value = True
+    return mock_manager
+
+
+class TestHealthEndpoints:
+    """Test health check endpoints."""
+    
+    def test_health_check(self, client):
+        """Test basic health check."""
+        response = client.get("/health")
+        assert response.status_code == 200
+        
+        data = response.json()
+        assert data["status"] == "healthy"
+        assert "timestamp" in data
+        assert "version" in data
+        assert "services" in data
+
+
+class TestAuthenticationEndpoints:
+    """Test authentication endpoints."""
+    
+    def test_login_success(self, client):
+        """Test successful login."""
+        response = client.post("/auth/login", json={
+            "username": "admin",
+            "password": "admin"
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "access_token" in data
+        assert data["token_type"] == "bearer"
+        assert "user" in data
+        assert data["user"]["username"] == "admin"
+    
+    def test_login_invalid_credentials(self, client):
+        """Test login with invalid credentials."""
+        response = client.post("/auth/login", json={
+            "username": "invalid",
+            "password": "invalid"
+        })
+        
+        assert response.status_code == 401
+    
+    def test_login_missing_credentials(self, client):
+        """Test login with missing credentials."""
+        response = client.post("/auth/login", json={})
+        assert response.status_code == 400
+
+
+class TestModelEndpoints:
+    """Test model management endpoints."""
+    
+    def test_upload_model_success(self, client, auth_headers):
+        """Test successful model upload."""
+        # Create a temporary file to upload
+        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as tmp_file:
+            tmp_file.write(b"fake model data")
+            tmp_file_path = tmp_file.name
+        
+        try:
+            with open(tmp_file_path, "rb") as f:
+                response = client.post(
+                    "/models/upload",
+                    headers=auth_headers,
+                    files={"file": ("test_model.pt", f, "application/octet-stream")},
+                    data={"name": "Test Model", "description": "Test description"}
+                )
+            
+            assert response.status_code == 200
+            data = response.json()
+            assert "model_id" in data
+            assert data["filename"] == "test_model.pt"
+            assert "upload_time" in data
+            
+        finally:
+            os.unlink(tmp_file_path)
+    
+    def test_upload_model_unauthorized(self, client):
+        """Test model upload without authentication."""
+        with tempfile.NamedTemporaryFile(suffix=".pt") as tmp_file:
+            tmp_file.write(b"fake model data")
+            tmp_file.seek(0)
+            
+            response = client.post(
+                "/models/upload",
+                files={"file": ("test_model.pt", tmp_file, "application/octet-stream")}
+            )
+            
+            assert response.status_code == 403  # No auth header
+    
+    def test_upload_invalid_file_type(self, client, auth_headers):
+        """Test upload with invalid file type."""
+        with tempfile.NamedTemporaryFile(suffix=".txt") as tmp_file:
+            tmp_file.write(b"not a model file")
+            tmp_file.seek(0)
+            
+            response = client.post(
+                "/models/upload",
+                headers=auth_headers,
+                files={"file": ("test.txt", tmp_file, "text/plain")}
+            )
+            
+            assert response.status_code == 400
+    
+    def test_list_models(self, client, auth_headers):
+        """Test listing models."""
+        response = client.get("/models", headers=auth_headers)
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "models" in data
+        assert "total" in data
+        assert "skip" in data
+        assert "limit" in data
+    
+    def test_list_models_with_pagination(self, client, auth_headers):
+        """Test listing models with pagination."""
+        response = client.get("/models?skip=0&limit=10", headers=auth_headers)
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["skip"] == 0
+        assert data["limit"] == 10
+
+
+class TestOptimizationEndpoints:
+    """Test optimization endpoints."""
+    
+    @patch('src.api.main.app.state')
+    def test_start_optimization(self, mock_state, client, auth_headers, mock_optimization_manager):
+        """Test starting optimization."""
+        mock_state.optimization_manager = mock_optimization_manager
+        
+        # First upload a model (mock the file existence)
+        with patch('pathlib.Path.glob') as mock_glob:
+            mock_glob.return_value = [Path("uploads/test-model_test.pt")]
+            
+            request_data = {
+                "model_id": "test-model",
+                "criteria_name": "default",
+                "target_accuracy_threshold": 0.95,
+                "optimization_techniques": ["quantization", "pruning"]
+            }
+            
+            response = client.post(
+                "/optimize",
+                headers=auth_headers,
+                json=request_data
+            )
+            
+            assert response.status_code == 200
+            data = response.json()
+            assert "session_id" in data
+            assert data["model_id"] == "test-model"
+            assert data["status"] == "started"
+    
+    @patch('src.api.main.app.state')
+    def test_start_optimization_model_not_found(self, mock_state, client, auth_headers, mock_optimization_manager):
+        """Test starting optimization with non-existent model."""
+        mock_state.optimization_manager = mock_optimization_manager
+        
+        with patch('pathlib.Path.glob') as mock_glob:
+            mock_glob.return_value = []  # No model files found
+            
+            request_data = {
+                "model_id": "non-existent-model",
+                "criteria_name": "default"
+            }
+            
+            response = client.post(
+                "/optimize",
+                headers=auth_headers,
+                json=request_data
+            )
+            
+            assert response.status_code == 404
+
+
+class TestSessionEndpoints:
+    """Test session management endpoints."""
+    
+    @patch('src.api.main.app.state')
+    def test_get_session_status(self, mock_state, client, auth_headers, mock_optimization_manager):
+        """Test getting session status."""
+        mock_state.optimization_manager = mock_optimization_manager
+        
+        response = client.get(
+            "/sessions/test-session-id/status",
+            headers=auth_headers
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["session_id"] == "test-session-id"
+        assert "status" in data
+        assert "progress_percentage" in data
+    
+    @patch('src.api.main.app.state')
+    def test_get_session_status_not_found(self, mock_state, client, auth_headers, mock_optimization_manager):
+        """Test getting status for non-existent session."""
+        mock_state.optimization_manager = mock_optimization_manager
+        mock_optimization_manager.get_session_status.side_effect = ValueError("Session not found")
+        
+        response = client.get(
+            "/sessions/non-existent/status",
+            headers=auth_headers
+        )
+        
+        assert response.status_code == 404
+    
+    @patch('src.api.main.app.state')
+    def test_list_sessions(self, mock_state, client, auth_headers, mock_optimization_manager):
+        """Test listing sessions."""
+        mock_state.optimization_manager = mock_optimization_manager
+        mock_optimization_manager.get_active_sessions.return_value = ["session1", "session2"]
+        
+        response = client.get("/sessions", headers=auth_headers)
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "sessions" in data
+        assert "total" in data
+    
+    @patch('src.api.main.app.state')
+    def test_cancel_session(self, mock_state, client, auth_headers, mock_optimization_manager):
+        """Test cancelling session."""
+        mock_state.optimization_manager = mock_optimization_manager
+        
+        response = client.post(
+            "/sessions/test-session-id/cancel",
+            headers=auth_headers
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "message" in data
+    
+    @patch('src.api.main.app.state')
+    def test_rollback_session(self, mock_state, client, auth_headers, mock_optimization_manager):
+        """Test rolling back session."""
+        mock_state.optimization_manager = mock_optimization_manager
+        
+        response = client.post(
+            "/sessions/test-session-id/rollback",
+            headers=auth_headers
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "message" in data
+
+
+class TestResultsEndpoints:
+    """Test results and evaluation endpoints."""
+    
+    @patch('src.api.main.app.state')
+    def test_get_session_results_completed(self, mock_state, client, auth_headers, mock_optimization_manager):
+        """Test getting results for completed session."""
+        mock_state.optimization_manager = mock_optimization_manager
+        
+        # Mock completed session status
+        mock_optimization_manager.get_session_status.return_value = {
+            "status": "completed",
+            "progress_percentage": 100.0,
+            "current_step": "Completed",
+            "start_time": "2024-01-01T00:00:00",
+            "last_update": "2024-01-01T01:00:00",
+            "error_message": None,
+            "session_data": {
+                "model_id": "test-model",
+                "steps_completed": 5
+            }
+        }
+        
+        response = client.get(
+            "/sessions/test-session-id/results",
+            headers=auth_headers
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["session_id"] == "test-session-id"
+        assert "optimization_summary" in data
+        assert "performance_improvements" in data
+        assert "techniques_applied" in data
+    
+    @patch('src.api.main.app.state')
+    def test_get_session_results_not_completed(self, mock_state, client, auth_headers, mock_optimization_manager):
+        """Test getting results for incomplete session."""
+        mock_state.optimization_manager = mock_optimization_manager
+        
+        # Mock running session status
+        mock_optimization_manager.get_session_status.return_value = {
+            "status": "running",
+            "progress_percentage": 50.0,
+            "current_step": "Optimizing",
+            "start_time": "2024-01-01T00:00:00",
+            "last_update": "2024-01-01T00:30:00",
+            "error_message": None,
+            "session_data": {
+                "model_id": "test-model",
+                "steps_completed": 2
+            }
+        }
+        
+        response = client.get(
+            "/sessions/test-session-id/results",
+            headers=auth_headers
+        )
+        
+        assert response.status_code == 400
+
+
+class TestErrorHandling:
+    """Test error handling scenarios."""
+    
+    def test_unauthorized_access(self, client):
+        """Test accessing protected endpoints without authentication."""
+        response = client.get("/models")
+        assert response.status_code == 403
+    
+    def test_invalid_token(self, client):
+        """Test accessing endpoints with invalid token."""
+        headers = {"Authorization": "Bearer invalid-token"}
+        response = client.get("/models", headers=headers)
+        assert response.status_code == 401
+    
+    @patch('src.api.main.app.state')
+    def test_service_unavailable(self, mock_state, client, auth_headers):
+        """Test handling when optimization manager is unavailable."""
+        # Remove optimization manager from app state
+        if hasattr(mock_state, 'optimization_manager'):
+            delattr(mock_state, 'optimization_manager')
+        
+        response = client.get("/sessions", headers=auth_headers)
+        assert response.status_code == 503
+
+
+class TestValidation:
+    """Test request validation."""
+    
+    def test_optimization_request_validation(self, client, auth_headers):
+        """Test optimization request validation."""
+        # Missing required model_id
+        response = client.post(
+            "/optimize",
+            headers=auth_headers,
+            json={}
+        )
+        assert response.status_code == 422
+    
+    def test_invalid_pagination_parameters(self, client, auth_headers):
+        """Test invalid pagination parameters."""
+        response = client.get("/models?skip=-1&limit=0", headers=auth_headers)
+        # Should still work but with corrected parameters
+        assert response.status_code == 200
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])
