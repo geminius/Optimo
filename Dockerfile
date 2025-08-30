@@ -12,13 +12,15 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements-basic.txt .
+RUN pip install --no-cache-dir -r requirements-basic.txt
 
-# Copy source code
+# Copy source code and setup files
 COPY src/ ./src/
 COPY config/ ./config/
 COPY setup.py .
+COPY README.md .
+COPY requirements-basic.txt requirements.txt
 
 # Install the package
 RUN pip install -e .

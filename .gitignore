@@ -177,3 +177,6 @@ uploads/
 .env.local
 .env.production
 config/secrets.json
+
+# Frontend test reports
+frontend/coverage/
