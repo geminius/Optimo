@@ -1,8 +1,11 @@
-"""
-Integration tests for the REST API.
-"""
+"""Integration tests for the REST API."""
 
 import pytest
+
+# Skip the entire module if required dependencies are missing
+pytest.importorskip("httpx")
+pytest.importorskip("jwt")
+
 import tempfile
 import json
 import os
@@ -417,5 +420,73 @@ class TestValidation:
         assert response.status_code == 200
 
 
-if __name__ == "__main__":
-    pytest.main([__file__])
+class TestDistilBertIntegration:
+    """End-to-end API validation using a DistilBERT model."""
+
+    @patch('src.api.main.app.state')
+    def test_distilbert_e2e(self, mock_state, client, auth_headers):
+        """Upload and optimize a DistilBERT model through the API."""
+        from unittest.mock import MagicMock
+
+        mock_optimization_manager = MagicMock()
+        mock_optimization_manager.start_optimization_session.return_value = "test-session-id"
+        mock_optimization_manager.get_session_status.return_value = {
+            "status": "running",
+            "progress_percentage": 50.0,
+            "current_step": "Analyzing model",
+            "start_time": "2024-01-01T00:00:00",
+            "last_update": "2024-01-01T00:30:00",
+            "error_message": None,
+            "session_data": {"model_id": "test-model", "steps_completed": 2},
+        }
+
+        mock_state.optimization_manager = mock_optimization_manager
+
+        from transformers import AutoModel
+        import torch
+        import tempfile
+        from pathlib import Path
+        import os
+
+        model = AutoModel.from_pretrained(
+            "hf-internal-testing/tiny-random-distilbert"
+        )
+
+        tmp_file = tempfile.NamedTemporaryFile(suffix=".pt", delete=False)
+        try:
+            torch.save(model, tmp_file)
+            tmp_file.close()
+
+            with open(tmp_file.name, "rb") as f:
+                upload_resp = client.post(
+                    "/models/upload",
+                    headers=auth_headers,
+                    files={"file": ("distilbert.pt", f, "application/octet-stream")},
+                    data={"name": "distilbert", "description": "test model"},
+                )
+
+            assert upload_resp.status_code == 200
+            model_id = upload_resp.json()["model_id"]
+
+            request_data = {"model_id": model_id, "criteria_name": "default"}
+            optimize_resp = client.post(
+                "/optimize", headers=auth_headers, json=request_data
+            )
+
+            assert optimize_resp.status_code == 200
+            session_id = optimize_resp.json()["session_id"]
+            assert session_id == "test-session-id"
+
+            status_resp = client.get(
+                f"/sessions/{session_id}/status", headers=auth_headers
+            )
+
+            assert status_resp.status_code == 200
+            assert status_resp.json()["session_id"] == session_id
+        finally:
+            tmp_path = Path(tmp_file.name)
+            if tmp_path.exists():
+                tmp_path.unlink()
+            if 'model_id' in locals():
+                for fp in Path('uploads').glob(f"{model_id}_*"):
+                    fp.unlink()
