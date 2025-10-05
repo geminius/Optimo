@@ -272,37 +272,52 @@ The platform uses JSON configuration files for customization:
 
 ## 🧪 Testing
 
-### Run All Tests
+The platform includes a comprehensive testing suite with 2,625+ lines of test code covering integration, performance, stress testing, and more.
+
+### Quick Start
 ```bash
-# Run comprehensive test suite
-python run_tests.py
+# Run all tests
+python3 run_tests.py --suite all
+
+# Run specific test suites
+python3 run_tests.py --suite unit          # Unit tests
+python3 run_tests.py --suite integration   # Integration tests
+python3 run_tests.py --suite performance   # Performance benchmarks
+python3 run_tests.py --suite stress        # Stress tests
+
+# Generate reports in multiple formats
+python3 run_tests.py --suite all --formats json html txt
+```
+
+### Using Pytest Directly
+```bash
+# Run all tests with pytest
+pytest
 
 # Run specific test categories
-python run_tests.py --suite unit
-python run_tests.py --suite integration
-python run_tests.py --suite performance
+pytest -m integration
+pytest -m performance
+pytest -m stress
 
-# Quick test subset
-python run_tests.py --quick
+# Quick mode (skip slow tests)
+pytest --quick
+
+# With coverage report
+pytest --cov=src --cov-report=html
 ```
 
-### Integration Validation
-```bash
-# Validate platform integration
-python validate_integration.py
+### Test Coverage
+- **Integration Tests**: End-to-end optimization workflows
+- **Performance Benchmarks**: Speed and accuracy metrics across 3 model types
+- **Stress Tests**: Concurrent sessions (5-50+), memory pressure, resource monitoring
+- **Test Data Generation**: 6 model types, 7+ scenarios
+- **Automated Reporting**: JSON, HTML, and TXT formats
 
-# Run integration test suite
-python scripts/run_integration_tests.py
-```
-
-### Performance Benchmarks
-```bash
-# Run performance benchmarks
-python -m pytest tests/performance/ -v
-
-# Run stress tests
-python -m pytest tests/stress/ -v
-```
+### Documentation
+For detailed testing documentation, see:
+- **[Testing Guide](docs/testing/README.md)** - Complete testing documentation
+- **[Test Suite Summary](docs/testing/TEST_SUITE_SUMMARY.md)** - Overview of all test components
+- **[Verification Report](docs/testing/TASK_17_VERIFICATION.md)** - Implementation verification
 
 ## 📊 Monitoring and Observability
 

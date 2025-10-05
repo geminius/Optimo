@@ -1,92 +1,33 @@
+---
+inclusion: always
+---
+
 # Technology Stack
 
-## Backend
-- **Python 3.8+**: Core platform language
-- **FastAPI**: REST API framework with automatic OpenAPI documentation
-- **PyTorch**: Primary ML framework for model optimization
-- **SQLAlchemy + Alembic**: Database ORM and migrations
-- **Uvicorn**: ASGI server for FastAPI
+## Core Stack
+- **Backend**: Python 3.8+ with FastAPI, PyTorch, Uvicorn ASGI server
+- **Frontend**: React 18 + TypeScript, Ant Design components, Socket.io for WebSockets
+- **Testing**: pytest (backend), Jest + React Testing Library (frontend)
+- **Deployment**: Docker with docker-compose for multi-container orchestration
 
-## Frontend
-- **React 18**: UI framework with TypeScript
-- **Ant Design**: UI component library
-- **React Router**: Client-side routing
-- **Axios**: HTTP client for API communication
-- **Socket.io**: Real-time WebSocket communication
-- **Recharts**: Data visualization
+## Critical Libraries
+- **Quantization**: bitsandbytes, auto-gptq, optimum
+- **ML Framework**: PyTorch (primary), transformers (Hugging Face models)
+- **Monitoring**: psutil for system metrics
+- **API**: FastAPI with automatic OpenAPI/Swagger documentation
 
-## Key Libraries
-- **bitsandbytes**: Advanced quantization techniques
-- **transformers**: Hugging Face model support
-- **auto-gptq**: GPTQ quantization
-- **optimum**: Model optimization utilities
-- **psutil**: System monitoring
-- **pytest**: Testing framework
+## Key Commands
 
-## Development Tools
-- **Black**: Code formatting
-- **Flake8**: Linting
-- **MyPy**: Type checking
-- **Docker**: Containerization
-- **Make**: Build automation
+**Start API server**: `uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload`
 
-## Common Commands
+**Run tests**: `python run_tests.py` (supports `--suite unit|integration|performance`)
 
-### Development Setup
-```bash
-# Install dependencies
-pip install -r requirements.txt
-pip install -e .
+**Frontend dev**: `cd frontend && npm start`
 
-# Install frontend dependencies
-cd frontend && npm install
-```
+**Docker**: `docker-compose -f docker-compose.dev.yml up` (dev) or `docker-compose.prod.yml` (prod)
 
-### Running the Platform
-```bash
-# Complete platform
-python -m src.main
-
-# API server only
-uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
-
-# Frontend development server
-cd frontend && npm start
-```
-
-### Testing
-```bash
-# Run all tests
-python run_tests.py
-
-# Run specific test suites
-python run_tests.py --suite unit
-python run_tests.py --suite integration
-python run_tests.py --suite performance
-
-# Frontend tests
-cd frontend && npm test
-```
-
-### Docker Deployment
-```bash
-# Development environment
-docker-compose -f docker-compose.dev.yml up
-
-# Production environment
-docker-compose -f docker-compose.prod.yml up
-```
-
-### Code Quality
-```bash
-# Format code
-black src/ tests/
-isort src/ tests/
-
-# Run linting
-flake8 src/ tests/
-mypy src/
-
-# Pre-commit hooks
-pre-commit install
-```
+## Code Quality Standards
+- Format with Black and isort before committing
+- Type hints required for all functions (checked with MyPy)
+- All async I/O operations must use async/await
+- WebSocket connections for real-time progress updates

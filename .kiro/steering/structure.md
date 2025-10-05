@@ -1,111 +1,87 @@
 ---
 inclusion: always
 ---
+---
+inclusion: always
+---
 
-# Architecture & Code Structure Guide
+# Architecture & Code Structure
 
-## Layered Architecture Pattern
-Follow strict separation of concerns across 4 layers:
-- **Agent Layer** (`src/agents/`): Autonomous optimization agents - inherit from base classes
-- **Service Layer** (`src/services/`): Business logic - use singleton pattern for managers
-- **Integration Layer** (`src/integration/`): Component wiring - dependency injection pattern
-- **API Layer** (`src/api/`): FastAPI endpoints - async/await for all I/O operations
+## Layered Architecture (Strict Separation)
 
-## Critical File Locations
-- **Agent base classes**: `src/agents/base.py` - Always inherit from these
-- **Core data models**: `src/models/core.py` - Use existing schemas
-- **Custom exceptions**: `src/utils/exceptions.py` - Extend these for error handling
-- **API models**: `src/api/models.py` - Pydantic schemas for API contracts
-- **Configuration**: `src/config/optimization_criteria.py` - Platform optimization settings
+1. **Agent Layer** (`src/agents/`) - Inherit from `BaseOptimizationAgent` or `BaseAgent`
+2. **Service Layer** (`src/services/`) - Singleton pattern for managers (MemoryManager, OptimizationManager, etc.)
+3. **Integration Layer** (`src/integration/`) - Dependency injection for component wiring
+4. **API Layer** (`src/api/`) - FastAPI endpoints, all I/O must be async/await
 
-## Code Patterns to Follow
+## Foundation Files (Check Before Creating New Components)
 
-### Agent Implementation
+- `src/agents/base.py` - Base classes for all agents
+- `src/models/core.py` - Core data models (ModelData, OptimizationResult, etc.)
+- `src/utils/exceptions.py` - Custom exceptions (OptimizationError, ValidationError, etc.)
+- `src/api/models.py` - Pydantic request/response models
+- `src/config/optimization_criteria.py` - Optimization configuration schemas
+
+## Required Patterns
+
+**New Agent** - Must inherit from base, use async/await, emit progress events:
 ```python
 from src.agents.base import BaseOptimizationAgent
-from src.utils.exceptions import OptimizationError
 
 class NewAgent(BaseOptimizationAgent):
     async def optimize(self, model_data: ModelData) -> OptimizationResult:
-        # Always use async/await for I/O operations
-        # Always handle errors with custom exceptions
-        # Always emit progress updates via self.emit_progress()
+        self.emit_progress({"status": "processing", "progress": 0.5})
+        # Implementation
 ```
 
-### Service Implementation
+**New Service** - Use singleton pattern:
 ```python
-from typing import Optional
-import logging
-
 class NewService:
-    _instance: Optional['NewService'] = None  # Singleton pattern
-    
+    _instance = None
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-    
-    async def process(self) -> None:
-        # Use structured logging
-        logging.info("Processing started", extra={"component": "NewService"})
 ```
 
-### API Endpoint Pattern
+**New API Endpoint** - Use dependency injection, typed responses:
 ```python
-from fastapi import APIRouter, Depends, HTTPException
-from src.api.models import RequestModel, ResponseModel
+from fastapi import APIRouter, Depends
 from src.api.dependencies import get_service
 
 router = APIRouter(prefix="/api/v1", tags=["category"])
 
 @router.post("/endpoint", response_model=ResponseModel)
-async def endpoint(
-    request: RequestModel,
-    service = Depends(get_service)
-) -> ResponseModel:
-    # Always use dependency injection
-    # Always return proper response models
+async def endpoint(request: RequestModel, service = Depends(get_service)):
+    return await service.process(request)
 ```
 
-## Naming Conventions (Strictly Enforced)
-- **Python files**: `snake_case.py`
-- **Classes**: `PascalCase` (e.g., `OptimizationManager`)
-- **Functions/methods**: `snake_case` (e.g., `optimize_model`)
-- **Constants**: `UPPER_SNAKE_CASE` (e.g., `MAX_RETRIES`)
-- **React components**: `PascalCase.tsx` (e.g., `ModelUpload.tsx`)
-- **Test files**: `test_*.py` or `*.test.tsx`
+## Naming Conventions
 
-## Import Order (Required)
-```python
-# 1. Standard library
-import os
-import logging
-from typing import Dict, List, Optional
+- Python: `snake_case.py`, classes `PascalCase`, functions `snake_case`, constants `UPPER_SNAKE_CASE`
+- React: Components `PascalCase.tsx`, tests `*.test.tsx`
+- Tests: `test_*.py` (backend)
 
-# 2. Third-party packages
-import torch
-from fastapi import FastAPI
+## Import Order (Enforced by isort)
 
-# 3. Local imports (relative)
-from .base import BaseAgent
-from ..utils.exceptions import OptimizationError
-```
+1. Standard library
+2. Third-party packages
+3. Local imports (relative)
 
 ## Error Handling Rules
+
 - Use custom exceptions from `src/utils/exceptions.py`
-- Always log errors with structured logging
-- Implement retry logic using `src/utils/retry.py`
-- Use recovery strategies from `src/utils/recovery.py`
+- Structured logging: `logger.info("message", extra={"component": "ComponentName"})`
+- Apply retry decorators from `src/utils/retry.py` for transient failures
+- Implement recovery strategies from `src/utils/recovery.py`
 
-## Testing Requirements
-- Place tests in `/tests/` with matching structure to `/src/`
-- Use pytest fixtures from `tests/conftest.py`
-- Integration tests go in `tests/integration/`
-- Performance tests go in `tests/performance/`
+## Directory Structure
 
-## Frontend Structure (React/TypeScript)
-- Components in `frontend/src/components/` - reusable UI elements
-- Pages in `frontend/src/pages/` - route-level components
-- API calls in `frontend/src/services/api.ts` - centralized HTTP client
-- Types in `frontend/src/types/index.ts` - TypeScript definitions
-- Context providers in `frontend/src/contexts/` - state management
+**Backend**: Tests mirror `src/` structure in `tests/` (use fixtures from `tests/conftest.py`)
+
+**Frontend**:
+- `components/` - Reusable UI components
+- `pages/` - Route-level pages
+- `services/api.ts` - Centralized API client
+- `types/index.ts` - TypeScript definitions
+- `contexts/` - React context providers
