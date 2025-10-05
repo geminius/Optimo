@@ -221,6 +221,7 @@ tests/integration/run_comprehensive_e2e_tests.py
 # Test analysis documentation
 INTEGRATION_TEST_ANALYSIS.md
 FRONTEND_TEST_ANALYSIS.md
+CLEANUP_SUMMARY.md
 frontend/E2E_TEST_SUMMARY.md
 
 # Redundant frontend tests (overlapping with E2E tests)
