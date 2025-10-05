@@ -323,6 +323,52 @@ def parametrized_model(synthetic_model_generator, model_type, model_size):
         pytest.skip(f"Model type {model_type} not supported")
 
 
+# Platform configuration fixtures
+@pytest.fixture
+def platform_config() -> dict:
+    """Configuration for platform integration tests."""
+    return {
+        "max_concurrent_sessions": 2,
+        "auto_rollback_on_failure": True,
+        "session_timeout_minutes": 60,
+        "analysis_agent": {
+            "timeout_seconds": 30,
+            "enable_profiling": True
+        },
+        "planning_agent": {
+            "max_plan_steps": 5,
+            "enable_validation": True
+        },
+        "evaluation_agent": {
+            "benchmark_timeout": 60,
+            "enable_comparison": True
+        },
+        "quantization_agent": {
+            "default_bits": 8,
+            "enable_dynamic": True
+        },
+        "pruning_agent": {
+            "default_sparsity": 0.5,
+            "structured_pruning": True
+        }
+    }
+
+
+@pytest.fixture
+def temp_workspace(temp_dir) -> Path:
+    """Create a temporary workspace directory for integration tests."""
+    workspace = temp_dir / "workspace"
+    workspace.mkdir(exist_ok=True)
+    
+    # Create subdirectories
+    (workspace / "models").mkdir(exist_ok=True)
+    (workspace / "configs").mkdir(exist_ok=True)
+    (workspace / "logs").mkdir(exist_ok=True)
+    (workspace / "results").mkdir(exist_ok=True)
+    
+    return workspace
+
+
 # Utility fixtures
 @pytest.fixture
 def assert_model_equality():

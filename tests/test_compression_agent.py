@@ -111,7 +111,7 @@ class TestSVDLinear:
         assert svd_layer.rank == rank
         assert svd_layer.U.shape == (50, rank)
         assert svd_layer.S.shape == (rank,)
-        assert svd_layer.Vt.shape == (rank, 100)
+        assert svd_layer.Vt.shape == (100, rank)  # Vt is [in_features, rank] after truncation
         assert svd_layer.bias is not None
     
     def test_svd_linear_forward(self):
@@ -174,7 +174,7 @@ class TestLowRankLinear:
         
         assert lr_layer.rank == 15
         assert lr_layer.A.shape == (30, 15)
-        assert lr_layer.B.shape == (15, 50)
+        assert lr_layer.B.shape == (15, 50)  # B is rank x in_features
         assert lr_layer.bias is not None
         
         # Test forward pass

@@ -179,7 +179,7 @@ class DistillationAgent(BaseOptimizationAgent):
         """Check if this agent can optimize the given model."""
         # Check if model has sufficient complexity for distillation
         param_count = sum(p.numel() for p in model.parameters())
-        if param_count < 1_000_000:  # Less than 1M parameters
+        if param_count < 10_000:  # Less than 10K parameters
             self.logger.warning(f"Model too small for effective distillation ({param_count:,} parameters)")
             return False
         

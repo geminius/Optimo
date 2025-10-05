@@ -135,7 +135,7 @@
   - [x] 18.2 Create ArchitectureSearchAgent for neural architecture search
   - [x] 18.3 Add CompressionAgent for tensor decomposition and compression
   - [x] 18.4 Implement technique-specific evaluation metrics and validation
-  - [x]* 18.5 Write unit tests for new optimization agents
+  - [x] 18.5 Write unit tests for new optimization agents
   - _Requirements: 6.3, 6.4_
 
 - [x] 19. Create deployment and containerization setup
@@ -143,13 +143,13 @@
   - [x] 19.2 Implement container orchestration with Docker Compose
   - [x] 19.3 Add environment-specific configuration management
   - [x] 19.4 Create deployment scripts and documentation
-  - [x]* 19.5 Write deployment validation tests
+  - [x] 19.5 Write deployment validation tests
   - _Requirements: 6.1, 6.2_
 
 - [x] 20. Integrate all components and perform end-to-end testing
   - [x] 20.1 Wire together all agents, services, and interfaces
   - [x] 20.2 Implement complete optimization workflow from upload to evaluation
   - [x] 20.3 Add comprehensive logging and monitoring across all components
-  - [x]* 20.4 Create end-to-end test scenarios covering all requirements
-  - [x]* 20.5 Perform final integration testing and bug fixes
+  - [x] 20.4 Create end-to-end test scenarios covering all requirements
+  - [x] 20.5 Perform final integration testing and bug fixes
   - _Requirements: All requirements_

@@ -71,7 +71,7 @@ class SVDLinear(nn.Module):
         # Keep only top-k singular values
         self.U = nn.Parameter(U[:, :rank])
         self.S = nn.Parameter(S[:rank])
-        self.Vt = nn.Parameter(Vt[:rank, :])
+        self.Vt = nn.Parameter(Vt[:, :rank])  # Vt is [in_features, rank] after truncation
         
         # Copy bias if it exists
         if original_layer.bias is not None:
@@ -80,8 +80,8 @@ class SVDLinear(nn.Module):
             self.register_parameter('bias', None)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Reconstruct weight matrix: W = U @ diag(S) @ Vt
-        weight = self.U @ torch.diag(self.S) @ self.Vt
+        # Reconstruct weight matrix: W = U @ diag(S) @ Vt.T
+        weight = self.U @ torch.diag(self.S) @ self.Vt.T
         return torch.nn.functional.linear(x, weight, self.bias)
     
     def get_compression_ratio(self, original_params: int) -> float:
@@ -122,7 +122,7 @@ class LowRankLinear(nn.Module):
         # Initialize using SVD of original weights
         U, S, Vt = torch.svd(linear_layer.weight.data)
         layer.A.data = U[:, :rank] @ torch.diag(torch.sqrt(S[:rank]))
-        layer.B.data = torch.diag(torch.sqrt(S[:rank])) @ Vt[:rank, :]
+        layer.B.data = torch.diag(torch.sqrt(S[:rank])) @ Vt[:, :rank].T
         
         if linear_layer.bias is not None:
             layer.bias.data = linear_layer.bias.data.clone()
@@ -251,7 +251,7 @@ class CompressionAgent(BaseOptimizationAgent):
         
         # Check model size (compression is most beneficial for larger models)
         param_count = sum(p.numel() for p in model.parameters())
-        if param_count < 500_000:  # Less than 500K parameters
+        if param_count < 10_000:  # Less than 10K parameters
             self.logger.warning(f"Model too small for effective compression ({param_count:,} parameters)")
             return False
         

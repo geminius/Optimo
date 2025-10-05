@@ -6,6 +6,7 @@ platform functionality from initialization through optimization workflows.
 """
 
 import pytest
+import pytest_asyncio
 import asyncio
 import tempfile
 import torch
@@ -101,27 +102,34 @@ def platform_config():
     }
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def platform_integrator(platform_config):
     """Create and initialize platform integrator."""
     integrator = PlatformIntegrator(platform_config)
     
+    # Create mock classes with initialize methods
+    def create_mock_with_initialize():
+        mock = MagicMock()
+        mock.return_value.initialize.return_value = True
+        mock.return_value.cleanup.return_value = None
+        return mock
+    
     # Mock the actual agent initialization to avoid dependencies
     with patch.multiple(
         'src.integration.platform_integration',
-        ModelStore=MagicMock,
-        MemoryManager=MagicMock,
-        NotificationService=MagicMock,
-        MonitoringService=MagicMock,
-        AnalysisAgent=MagicMock,
-        PlanningAgent=MagicMock,
-        EvaluationAgent=MagicMock,
-        QuantizationAgent=MagicMock,
-        PruningAgent=MagicMock,
-        DistillationAgent=MagicMock,
-        CompressionAgent=MagicMock,
-        ArchitectureSearchAgent=MagicMock,
-        OptimizationManager=MagicMock
+        ModelStore=create_mock_with_initialize(),
+        MemoryManager=create_mock_with_initialize(),
+        NotificationService=create_mock_with_initialize(),
+        MonitoringService=create_mock_with_initialize(),
+        AnalysisAgent=create_mock_with_initialize(),
+        PlanningAgent=create_mock_with_initialize(),
+        EvaluationAgent=create_mock_with_initialize(),
+        QuantizationAgent=create_mock_with_initialize(),
+        PruningAgent=create_mock_with_initialize(),
+        DistillationAgent=create_mock_with_initialize(),
+        CompressionAgent=create_mock_with_initialize(),
+        ArchitectureSearchAgent=create_mock_with_initialize(),
+        OptimizationManager=create_mock_with_initialize()
     ):
         success = await integrator.initialize_platform()
         assert success, "Platform initialization should succeed"

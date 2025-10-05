@@ -20,11 +20,9 @@ docker-compose ps
 echo "⏳ Waiting for services to be ready..."
 sleep 30
 
-# Run deployment validation tests
-echo "🧪 Running deployment validation tests..."
-python -m pytest tests/deployment/test_deployment_validation.py -v \
-    --tb=short \
-    --disable-warnings
+# Run comprehensive deployment validation tests
+echo "🧪 Running comprehensive deployment validation tests..."
+python scripts/run_deployment_validation.py --environment $ENVIRONMENT --suite all
 
 # Check service health endpoints
 echo "🏥 Checking service health..."

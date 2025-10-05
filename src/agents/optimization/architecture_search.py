@@ -390,7 +390,7 @@ class ArchitectureSearchAgent(BaseOptimizationAgent):
         """Check if this agent can optimize the given model."""
         # Check if model has sufficient complexity for architecture search
         param_count = sum(p.numel() for p in model.parameters())
-        if param_count < 100_000:  # Less than 100K parameters
+        if param_count < 10_000:  # Less than 10K parameters
             self.logger.warning(f"Model too small for architecture search ({param_count:,} parameters)")
             return False
         

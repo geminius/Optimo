@@ -16,6 +16,7 @@ from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
 import uvicorn
 from pydantic import BaseModel, Field
 
@@ -37,47 +38,10 @@ from ..config.optimization_criteria import OptimizationCriteria
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Get OpenAPI configuration
-openapi_config = get_openapi_config()
-
-# Create FastAPI application
-app = FastAPI(
-    title=openapi_config["title"],
-    description=openapi_config["description"],
-    version=openapi_config["version"],
-    contact=openapi_config["contact"],
-    license_info=openapi_config["license"],
-    servers=openapi_config["servers"],
-    docs_url="/docs",
-    redoc_url="/redoc"
-)
-
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Security
-security = HTTPBearer()
-
-# Include routers
-app.include_router(monitoring_router)
-
-# Global configuration
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
-
-MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
-ALLOWED_EXTENSIONS = {".pt", ".pth", ".onnx", ".pb", ".h5", ".safetensors"}
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services on startup."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan."""
+    # Startup
     logger.info("Starting Robotics Model Optimization Platform API")
     
     # Check if platform integrator is already set (from main.py)
@@ -125,11 +89,10 @@ async def startup_event():
         app.state.optimization_manager = platform_integrator.get_optimization_manager()
     
     logger.info("API startup completed successfully")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown."""
+    
+    yield
+    
+    # Shutdown
     logger.info("Shutting down Robotics Model Optimization Platform API")
     
     if hasattr(app.state, 'platform_integrator'):
@@ -138,6 +101,48 @@ async def shutdown_event():
         app.state.optimization_manager.cleanup()
     
     logger.info("API shutdown completed")
+
+
+# Get OpenAPI configuration
+openapi_config = get_openapi_config()
+
+# Create FastAPI application
+app = FastAPI(
+    title=openapi_config["title"],
+    description=openapi_config["description"],
+    version=openapi_config["version"],
+    contact=openapi_config["contact"],
+    license_info=openapi_config["license"],
+    servers=openapi_config["servers"],
+    docs_url="/docs",
+    redoc_url="/redoc",
+    lifespan=lifespan
+)
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure appropriately for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Security
+security = HTTPBearer()
+
+# Include routers
+app.include_router(monitoring_router)
+
+# Global configuration
+UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
+ALLOWED_EXTENSIONS = {".pt", ".pth", ".onnx", ".pb", ".h5", ".safetensors"}
+
+
+
 
 
 @app.exception_handler(Exception)

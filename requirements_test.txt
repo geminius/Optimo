@@ -1,0 +1,40 @@
+# Core dependencies for testing
+torch>=2.0.0
+numpy>=1.21.0
+dataclasses-json>=0.5.7
+
+# API and web framework
+fastapi>=0.68.0
+uvicorn>=0.15.0
+pydantic>=1.8.0
+httpx>=0.23.0
+PyJWT>=2.0.0
+
+# Database and storage
+sqlalchemy>=1.4.0
+alembic>=1.7.0
+
+# Basic optimization libraries (skip problematic ones for testing)
+transformers>=4.20.0
+optimum>=1.12.0
+
+# Testing
+pytest>=6.2.0
+pytest-asyncio>=0.18.0
+pytest-cov>=2.12.0
+pytest-json-report>=1.5.0
+requests>=2.25.0
+websocket-client>=1.0.0
+psycopg2-binary>=2.9.0
+redis>=4.0.0
+onnx>=1.12.0
+tensorflow>=2.10.0
+
+# System monitoring
+psutil>=5.8.0
+watchdog>=2.1.0
+
+# Development tools
+black>=21.0.0
+flake8>=3.9.0
+mypy>=0.910
