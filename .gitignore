@@ -185,3 +185,44 @@ config/secrets.json
 
 # Frontend test reports
 frontend/coverage/
+
+# Scripts - keep only essential .sh files (deploy.sh, backup.sh, validate-deployment.sh)
+scripts/run_deployment_validation.py
+scripts/run_integration_tests.py
+scripts/init-db.sql
+scripts/test-deployment.sh
+
+# Debug scripts
+debug_integration.py
+
+# Development documentation (internal notes, not for end users)
+GEMINI.md
+INTEGRATION_SUMMARY.md
+INTEGRATION_TEST_FIXES_SUMMARY.md
+ORGANIZATION_SUMMARY.md
+docs/testing/
+docs/QUICK_REFERENCE.md
+docs/STRUCTURE.md
+
+# Test documentation (development artifacts, not for end users)
+tests/integration/API_INTEGRATION_TEST_SUMMARY.md
+tests/integration/E2E_IMPLEMENTATION_SUMMARY.md
+tests/integration/E2E_TEST_REQUIREMENTS_MAPPING.md
+tests/deployment/README.md
+
+# Redundant integration tests (overlapping coverage)
+tests/integration/test_e2e_requirements_validation.py
+tests/integration/test_comprehensive_e2e_requirements.py
+tests/integration/test_requirements_coverage_validation.py
+tests/integration/test_final_integration_validation.py
+tests/integration/test_e2e_edge_cases_and_scenarios.py
+tests/integration/run_comprehensive_e2e_tests.py
+
+# Test analysis documentation
+INTEGRATION_TEST_ANALYSIS.md
+FRONTEND_TEST_ANALYSIS.md
+CLEANUP_SUMMARY.md
+frontend/E2E_TEST_SUMMARY.md
+
+# Redundant frontend tests (overlapping with E2E tests)
+frontend/src/tests/integration/App.integration.test.tsx

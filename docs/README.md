@@ -2,41 +2,12 @@
 
 Welcome to the documentation for the Robotics Model Optimization Platform.
 
-## Documentation Structure
-
-For a complete overview of documentation organization, see [STRUCTURE.md](./STRUCTURE.md).
-
-### [Quick Reference](./QUICK_REFERENCE.md) ⭐
-Fast access to common tasks and commands:
-- Running tests
-- Finding documentation
-- Quick commands
-- Troubleshooting tips
-
-### [Testing Documentation](./testing/)
-Comprehensive testing suite documentation including:
-- Test execution guides
-- Test suite overview
-- Verification reports
-- Test coverage details
-
-### [Documentation Structure](./STRUCTURE.md)
-Complete documentation organization guide including:
-- Directory structure
-- File naming conventions
-- Quick navigation guides
-- Maintenance guidelines
-
 ## Quick Links
 
-### Getting Started
 - [Main README](../README.md) - Project overview and setup
 - [Deployment Guide](../DEPLOYMENT.md) - Deployment instructions
-- [Integration Summary](../INTEGRATION_SUMMARY.md) - Integration details
 
-### Development
-- [Testing Guide](./testing/README.md) - How to run and write tests
-- [Test Suite Summary](./testing/TEST_SUITE_SUMMARY.md) - Complete test suite overview
+
 
 ### API Documentation
 - OpenAPI documentation available at `/docs` when running the API server
@@ -111,13 +82,69 @@ docker-compose -f docker-compose.prod.yml up
 ```
 
 ### Running Tests
+
 ```bash
 # Run all tests
 python3 run_tests.py --suite all
 
-# Run specific test suite
+# Run specific test suites
+python3 run_tests.py --suite unit
 python3 run_tests.py --suite integration
+python3 run_tests.py --suite performance
+python3 run_tests.py --suite stress
+
+# Generate specific report formats
+python3 run_tests.py --suite all --formats json html txt
+
+# Custom output directory
+python3 run_tests.py --suite all --output-dir custom_results
 ```
+
+#### Using Pytest Directly
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/integration/test_end_to_end_workflows.py
+
+# Run with markers
+pytest -m integration
+pytest -m performance
+pytest -m stress
+
+# Quick mode (skip slow tests)
+pytest --quick
+
+# With coverage
+pytest --cov=src --cov-report=html
+```
+
+#### Test Structure
+
+The test suite is organized into multiple categories:
+
+- **Unit Tests** (`tests/test_*.py`) - Individual component testing with mocks
+- **Integration Tests** (`tests/integration/`) - End-to-end workflow testing
+- **Performance Tests** (`tests/performance/`) - Optimization speed and accuracy benchmarks
+- **Stress Tests** (`tests/stress/`) - Concurrent session and resource testing
+- **Test Data** (`tests/data/`) - Test data generation utilities
+
+#### Supported Model Types
+
+1. **CNN** - Convolutional Neural Networks
+2. **Transformer** - Attention-based models
+3. **ResNet** - Residual networks
+4. **LSTM** - Recurrent networks
+5. **MLP** - Multi-layer perceptrons
+6. **Robotics VLA** - Vision-Language-Action models
+
+#### Test Configuration
+
+- **Pytest Config**: See `pytest.ini` at project root
+- **Test Fixtures**: See `tests/conftest.py` for available fixtures
+- **Custom Options**: `--quick`, `--gpu`, `--stress`
 
 ## Configuration
 
