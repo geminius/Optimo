@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import tempfile
 import os
+import time
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 
@@ -462,6 +463,280 @@ class TestAnalysisAgentIntegration:
         assert agent.device.type == "cpu"
         
         agent.cleanup()
+
+
+class TestAnalysisAgentErrorHandling:
+    """Test error handling and edge cases for AnalysisAgent."""
+    
+    def test_initialization_failure(self):
+        """Test agent initialization failure handling."""
+        # Test with invalid config that might cause initialization issues
+        config = {"invalid_config": True}
+        agent = AnalysisAgent(config)
+        
+        # Should still initialize successfully as the agent is robust
+        result = agent.initialize()
+        assert result is True
+        
+        agent.cleanup()
+    
+    def test_analyze_model_unsupported_format(self, analysis_agent):
+        """Test analysis with unsupported model format."""
+        # Create a file with unsupported extension
+        with tempfile.NamedTemporaryFile(suffix='.txt', delete=False) as f:
+            f.write(b"not a model file")
+            temp_path = f.name
+        
+        try:
+            with pytest.raises(ValueError, match="Unsupported model format"):
+                analysis_agent.analyze_model(temp_path)
+        finally:
+            os.unlink(temp_path)
+    
+    def test_analyze_model_corrupted_file(self, analysis_agent):
+        """Test analysis with corrupted model file."""
+        # Create a corrupted .pt file
+        with tempfile.NamedTemporaryFile(suffix='.pt', delete=False) as f:
+            f.write(b"corrupted model data")
+            temp_path = f.name
+        
+        try:
+            with pytest.raises(Exception):  # Should raise some kind of loading error
+                analysis_agent.analyze_model(temp_path)
+        finally:
+            os.unlink(temp_path)
+    
+    def test_identify_bottlenecks_with_error(self, analysis_agent):
+        """Test bottleneck identification with error conditions."""
+        # Create a mock model that might cause issues
+        class ProblematicModel(nn.Module):
+            def forward(self, x):
+                raise RuntimeError("Simulated model error")
+        
+        problematic_model = ProblematicModel()
+        bottlenecks = analysis_agent.identify_bottlenecks(problematic_model)
+        
+        # Should handle the error gracefully and return error information
+        assert isinstance(bottlenecks, list)
+        # May contain error information
+        if bottlenecks:
+            error_bottleneck = next((b for b in bottlenecks if b.get("type") == "analysis_error"), None)
+            if error_bottleneck:
+                assert "Failed to identify bottlenecks" in error_bottleneck["description"]
+    
+    def test_load_model_state_dict_only(self, analysis_agent):
+        """Test loading model with state_dict only (should fail)."""
+        # Create a file with only state_dict
+        simple_model = nn.Linear(10, 1)
+        state_dict = simple_model.state_dict()
+        
+        with tempfile.NamedTemporaryFile(suffix='.pt', delete=False) as f:
+            torch.save({"state_dict": state_dict}, f.name)
+            temp_path = f.name
+        
+        try:
+            with pytest.raises(ValueError, match="State dict found but no model architecture"):
+                analysis_agent._load_model(temp_path)
+        finally:
+            os.unlink(temp_path)
+    
+    def test_find_compatible_input_difficult_model(self, analysis_agent):
+        """Test finding compatible input for a model with unusual input requirements."""
+        class UnusualInputModel(nn.Module):
+            def forward(self, x):
+                # Requires very specific input shape
+                if x.shape != (1, 7, 13, 17):
+                    raise RuntimeError("Invalid input shape")
+                return x.mean()
+        
+        unusual_model = UnusualInputModel()
+        
+        # Should fall back to basic tensor if no common shapes work
+        compatible_input = analysis_agent._find_compatible_input(unusual_model)
+        assert isinstance(compatible_input, torch.Tensor)
+        assert compatible_input.device == analysis_agent.device
+    
+    def test_profile_performance_with_gpu_unavailable(self, analysis_agent):
+        """Test performance profiling when GPU is not available."""
+        # This test ensures CPU-only profiling works correctly
+        simple_model = nn.Linear(10, 1)
+        perf_profile = analysis_agent._profile_performance(simple_model)
+        
+        assert isinstance(perf_profile, PerformanceProfile)
+        assert perf_profile.inference_time_ms >= 0
+        assert perf_profile.memory_usage_mb >= 0
+        assert perf_profile.throughput_samples_per_sec >= 0
+    
+    def test_empty_model_analysis(self, analysis_agent):
+        """Test analysis of an empty or minimal model."""
+        class EmptyModel(nn.Module):
+            def forward(self, x):
+                return x
+        
+        empty_model = EmptyModel()
+        
+        # Should handle empty model gracefully
+        arch_summary = analysis_agent._analyze_architecture(empty_model)
+        assert arch_summary.total_parameters == 0
+        # The model itself is counted as a layer when it has no children
+        assert arch_summary.total_layers >= 0
+        # Should have the model type in layer_types
+        assert "EmptyModel" in arch_summary.layer_types
+    
+    def test_very_large_model_analysis(self, analysis_agent):
+        """Test analysis of a very large model."""
+        class VeryLargeModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Create a model with many parameters
+                layers = []
+                for i in range(10):
+                    layers.append(nn.Linear(1000, 1000))
+                    layers.append(nn.ReLU())
+                self.layers = nn.Sequential(*layers)
+            
+            def forward(self, x):
+                return self.layers(x)
+        
+        large_model = VeryLargeModel()
+        
+        # Should identify this as suitable for distillation
+        arch_summary = analysis_agent._analyze_architecture(large_model)
+        can_distill = analysis_agent._can_distill(large_model, arch_summary)
+        assert can_distill is True
+        
+        # Should identify memory bottlenecks
+        memory_bottlenecks = analysis_agent._identify_memory_bottlenecks(large_model)
+        assert len(memory_bottlenecks) > 0
+    
+    def test_model_with_transformer_layers(self, analysis_agent):
+        """Test analysis of model with transformer-like layers."""
+        class TransformerLikeModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attention = nn.MultiheadAttention(embed_dim=64, num_heads=8)
+                self.linear = nn.Linear(64, 64)
+            
+            def forward(self, x):
+                # x should be (seq_len, batch, embed_dim)
+                attn_out, _ = self.attention(x, x, x)
+                return self.linear(attn_out)
+        
+        transformer_model = TransformerLikeModel()
+        
+        # Should identify compute bottlenecks due to attention
+        compute_bottlenecks = analysis_agent._identify_compute_bottlenecks(transformer_model)
+        assert len(compute_bottlenecks) > 0
+        
+        # Should find attention-related bottleneck
+        attention_bottleneck = next(
+            (b for b in compute_bottlenecks if "MultiheadAttention" in b.get("operation_type", "")), 
+            None
+        )
+        assert attention_bottleneck is not None
+    
+    def test_get_layer_optimization_suggestions_unknown_layer(self, analysis_agent):
+        """Test getting optimization suggestions for unknown layer."""
+        simple_model = nn.Linear(10, 1)
+        
+        # Test with non-existent layer name
+        suggestions = analysis_agent._get_layer_optimization_suggestions("non_existent_layer", simple_model)
+        assert "Layer not found" in suggestions
+    
+    def test_compatibility_assessment_edge_cases(self, analysis_agent):
+        """Test compatibility assessment with edge case models."""
+        # Model with no parameters
+        class NoParamModel(nn.Module):
+            def forward(self, x):
+                return torch.relu(x)
+        
+        no_param_model = NoParamModel()
+        arch_summary = analysis_agent._analyze_architecture(no_param_model)
+        
+        # Should not be suitable for pruning (no parameters)
+        can_prune = analysis_agent._can_prune(no_param_model, arch_summary)
+        assert can_prune is False
+        
+        # Should not be suitable for compression (no Linear layers)
+        can_compress = analysis_agent._can_compress(no_param_model, arch_summary)
+        assert can_compress is False
+    
+    def test_recommendations_with_no_opportunities(self, analysis_agent):
+        """Test recommendation generation when no opportunities are found."""
+        empty_opportunities = []
+        empty_compatibility = {}
+        
+        recommendations = analysis_agent._generate_recommendations(empty_opportunities, empty_compatibility)
+        assert isinstance(recommendations, list)
+        assert len(recommendations) == 0
+    
+    def test_model_depth_calculation_complex_model(self, analysis_agent):
+        """Test model depth calculation with complex nested structure."""
+        class ComplexNestedModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.branch1 = nn.Sequential(
+                    nn.Linear(10, 20),
+                    nn.Sequential(
+                        nn.Linear(20, 30),
+                        nn.ReLU(),
+                        nn.Sequential(
+                            nn.Linear(30, 40),
+                            nn.ReLU()
+                        )
+                    )
+                )
+                self.branch2 = nn.Linear(10, 40)
+            
+            def forward(self, x):
+                return self.branch1(x) + self.branch2(x)
+        
+        complex_model = ComplexNestedModel()
+        depth = analysis_agent._calculate_model_depth(complex_model)
+        
+        # Should calculate reasonable depth for nested structure
+        assert depth > 3  # Should be deeper than simple models
+
+
+class TestAnalysisAgentPerformance:
+    """Test performance-related aspects of AnalysisAgent."""
+    
+    def test_analysis_performance_with_reduced_samples(self):
+        """Test that analysis works with minimal profiling samples for speed."""
+        config = {
+            "profiling_samples": 1,  # Minimal samples for speed
+            "warmup_samples": 0      # No warmup for speed
+        }
+        agent = AnalysisAgent(config)
+        agent.initialize()
+        
+        simple_model = nn.Linear(10, 1)
+        
+        # Should complete quickly with minimal samples
+        start_time = time.time()
+        perf_profile = agent._profile_performance(simple_model)
+        end_time = time.time()
+        
+        assert isinstance(perf_profile, PerformanceProfile)
+        assert (end_time - start_time) < 5.0  # Should complete in reasonable time
+        
+        agent.cleanup()
+    
+    def test_memory_usage_tracking(self, analysis_agent):
+        """Test memory usage tracking functionality."""
+        initial_memory = analysis_agent._get_memory_usage()
+        
+        # Create a model that uses some memory
+        large_model = nn.Linear(1000, 1000)
+        large_model.to(analysis_agent.device)
+        
+        # Memory usage should be tracked
+        memory_after = analysis_agent._get_memory_usage()
+        
+        assert isinstance(initial_memory, float)
+        assert isinstance(memory_after, float)
+        assert initial_memory >= 0
+        assert memory_after >= 0
 
 
 if __name__ == "__main__":

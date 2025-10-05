@@ -370,6 +370,260 @@ class TestMonitoringService(unittest.TestCase):
         self.assertEqual(health_dict['message'], "Test warning message")
         self.assertEqual(health_dict['details']['cpu'], 85.0)
         self.assertIn('timestamp', health_dict)
+    
+    @patch('src.services.monitoring_service.time.sleep')
+    @patch('src.services.monitoring_service.psutil')
+    def test_monitoring_loop_error_recovery(self, mock_psutil, mock_sleep):
+        """Test monitoring loop error recovery."""
+        # Mock psutil to raise an exception on first call
+        mock_psutil.cpu_percent.side_effect = Exception("Test error")
+        
+        mock_memory = Mock()
+        mock_memory.percent = 60.0
+        mock_memory.used = 8 * 1024 * 1024 * 1024
+        mock_memory.available = 4 * 1024 * 1024 * 1024
+        mock_psutil.virtual_memory.return_value = mock_memory
+        
+        mock_disk = Mock()
+        mock_disk.total = 1000 * 1024 * 1024 * 1024
+        mock_disk.used = 500 * 1024 * 1024 * 1024
+        mock_disk.free = 500 * 1024 * 1024 * 1024
+        mock_psutil.disk_usage.return_value = mock_disk
+        
+        # Mock sleep to stop the loop after first iteration
+        def stop_after_first_sleep(duration):
+            self.monitoring_service._monitoring_active = False
+        
+        mock_sleep.side_effect = stop_after_first_sleep
+        
+        # Start monitoring with very short interval for testing
+        self.monitoring_service._monitoring_interval = 0.1
+        self.monitoring_service._monitoring_active = True
+        
+        # Run the monitoring loop (will stop after first iteration due to mock_sleep)
+        self.monitoring_service._monitoring_loop()
+        
+        # Verify an alert was created for the monitoring error
+        alerts = self.notification_service.get_alerts()
+        monitoring_alerts = [a for a in alerts if "Monitoring Error" in a.title]
+        self.assertGreater(len(monitoring_alerts), 0)
+    
+    def test_health_check_status_change_notifications(self):
+        """Test notifications when health check status changes."""
+        def dynamic_health_check():
+            # This will be called multiple times with different statuses
+            if not hasattr(dynamic_health_check, 'call_count'):
+                dynamic_health_check.call_count = 0
+            
+            dynamic_health_check.call_count += 1
+            
+            if dynamic_health_check.call_count == 1:
+                status = HealthStatus.HEALTHY
+                message = "All good"
+            elif dynamic_health_check.call_count == 2:
+                status = HealthStatus.WARNING
+                message = "Warning detected"
+            else:
+                status = HealthStatus.CRITICAL
+                message = "Critical issue"
+            
+            return HealthCheck(
+                component="dynamic_component",
+                status=status,
+                message=message,
+                timestamp=datetime.now()
+            )
+        
+        # Register the dynamic health check
+        self.monitoring_service.register_health_check("dynamic_component", dynamic_health_check)
+        
+        # Run health checks multiple times
+        self.monitoring_service._run_health_checks()  # HEALTHY - no alert
+        initial_alerts = len(self.notification_service.get_alerts())
+        
+        self.monitoring_service._run_health_checks()  # WARNING - should create alert
+        warning_alerts = len(self.notification_service.get_alerts())
+        self.assertGreater(warning_alerts, initial_alerts)
+        
+        self.monitoring_service._run_health_checks()  # CRITICAL - should create alert
+        critical_alerts = len(self.notification_service.get_alerts())
+        self.assertGreater(critical_alerts, warning_alerts)
+    
+    @patch('src.services.monitoring_service.psutil')
+    def test_metrics_history_limit(self, mock_psutil):
+        """Test that metrics history is limited to prevent memory issues."""
+        # Mock psutil
+        mock_psutil.cpu_percent.return_value = 50.0
+        mock_memory = Mock()
+        mock_memory.percent = 60.0
+        mock_memory.used = 8 * 1024 * 1024 * 1024
+        mock_memory.available = 4 * 1024 * 1024 * 1024
+        mock_psutil.virtual_memory.return_value = mock_memory
+        
+        mock_disk = Mock()
+        mock_disk.total = 1000 * 1024 * 1024 * 1024
+        mock_disk.used = 500 * 1024 * 1024 * 1024
+        mock_disk.free = 500 * 1024 * 1024 * 1024
+        mock_psutil.disk_usage.return_value = mock_disk
+        
+        # Add more than 1000 metrics to test the limit
+        # Simulate what the monitoring loop does
+        for i in range(1050):
+            metrics = self.monitoring_service._collect_performance_metrics()
+            self.monitoring_service._metrics_history.append(metrics)
+            
+            # Apply the same limit logic as the monitoring loop
+            if len(self.monitoring_service._metrics_history) > 1000:
+                self.monitoring_service._metrics_history = self.monitoring_service._metrics_history[-1000:]
+        
+        # Verify history is limited to 1000 entries
+        self.assertEqual(len(self.monitoring_service._metrics_history), 1000)
+    
+    def test_threshold_validation(self):
+        """Test threshold validation and edge cases."""
+        # Test setting thresholds to extreme values
+        self.monitoring_service.set_thresholds(
+            cpu_warning=0.0,
+            cpu_critical=100.0,
+            memory_warning=0.0,
+            memory_critical=100.0,
+            disk_warning=0.0,
+            disk_critical=100.0
+        )
+        
+        # Verify thresholds were set
+        self.assertEqual(self.monitoring_service._cpu_warning_threshold, 0.0)
+        self.assertEqual(self.monitoring_service._cpu_critical_threshold, 100.0)
+        
+        # Test partial threshold updates
+        self.monitoring_service.set_thresholds(cpu_warning=75.0)
+        self.assertEqual(self.monitoring_service._cpu_warning_threshold, 75.0)
+        self.assertEqual(self.monitoring_service._cpu_critical_threshold, 100.0)  # Should remain unchanged
+    
+    @patch('src.services.monitoring_service.psutil')
+    def test_psutil_exception_handling(self, mock_psutil):
+        """Test handling of psutil exceptions in health checks."""
+        # Mock psutil to raise exceptions
+        mock_psutil.cpu_percent.side_effect = Exception("CPU error")
+        mock_psutil.virtual_memory.side_effect = Exception("Memory error")
+        mock_psutil.disk_usage.side_effect = Exception("Disk error")
+        
+        # Test system resources health check with exception
+        health_check = self.monitoring_service._check_system_resources()
+        self.assertEqual(health_check.status, HealthStatus.UNKNOWN)
+        self.assertIn("Failed to check system resources", health_check.message)
+        
+        # Test disk space health check with exception
+        health_check = self.monitoring_service._check_disk_space()
+        self.assertEqual(health_check.status, HealthStatus.UNKNOWN)
+        self.assertIn("Failed to check disk space", health_check.message)
+        
+        # Test memory usage health check with exception
+        health_check = self.monitoring_service._check_memory_usage()
+        self.assertEqual(health_check.status, HealthStatus.UNKNOWN)
+        self.assertIn("Failed to check memory usage", health_check.message)
+    
+    @patch('src.services.monitoring_service.psutil')
+    def test_monitoring_service_cleanup(self, mock_psutil):
+        """Test proper cleanup when monitoring is stopped."""
+        # Mock psutil to prevent actual system calls
+        mock_psutil.cpu_percent.return_value = 50.0
+        mock_memory = Mock()
+        mock_memory.percent = 60.0
+        mock_memory.used = 8 * 1024 * 1024 * 1024
+        mock_memory.available = 4 * 1024 * 1024 * 1024
+        mock_psutil.virtual_memory.return_value = mock_memory
+        
+        mock_disk = Mock()
+        mock_disk.total = 1000 * 1024 * 1024 * 1024
+        mock_disk.used = 500 * 1024 * 1024 * 1024
+        mock_disk.free = 500 * 1024 * 1024 * 1024
+        mock_psutil.disk_usage.return_value = mock_disk
+        
+        # Add some test data before starting monitoring
+        test_metrics = PerformanceMetrics(
+            timestamp=datetime.now(),
+            cpu_usage_percent=50.0,
+            memory_usage_percent=60.0,
+            memory_used_mb=8192,
+            memory_available_mb=4096,
+            disk_usage_percent=70.0,
+            disk_free_gb=500,
+            active_sessions=1
+        )
+        self.monitoring_service._metrics_history.append(test_metrics)
+        initial_count = len(self.monitoring_service._metrics_history)
+        
+        # Start monitoring
+        self.monitoring_service.start_monitoring(interval=1)
+        self.assertTrue(self.monitoring_service._monitoring_active)
+        
+        # Stop monitoring immediately
+        self.monitoring_service.stop_monitoring()
+        self.assertFalse(self.monitoring_service._monitoring_active)
+        
+        # Verify data is still available after stopping
+        self.assertGreaterEqual(len(self.monitoring_service._metrics_history), initial_count)
+        current_metrics = self.monitoring_service.get_current_metrics()
+        self.assertIsNotNone(current_metrics)
+    
+    def test_double_start_stop_monitoring(self):
+        """Test starting/stopping monitoring multiple times."""
+        # Test double start
+        self.monitoring_service.start_monitoring()
+        self.assertTrue(self.monitoring_service._monitoring_active)
+        
+        # Starting again should not cause issues
+        self.monitoring_service.start_monitoring()
+        self.assertTrue(self.monitoring_service._monitoring_active)
+        
+        # Test double stop
+        self.monitoring_service.stop_monitoring()
+        self.assertFalse(self.monitoring_service._monitoring_active)
+        
+        # Stopping again should not cause issues
+        self.monitoring_service.stop_monitoring()
+        self.assertFalse(self.monitoring_service._monitoring_active)
+    
+    def test_get_metrics_history_edge_cases(self):
+        """Test edge cases in metrics history retrieval."""
+        # Test with no metrics
+        history = self.monitoring_service.get_metrics_history(hours=1)
+        self.assertEqual(len(history), 0)
+        
+        # Add metrics with different timestamps
+        old_metrics = PerformanceMetrics(
+            timestamp=datetime.now() - timedelta(hours=2),
+            cpu_usage_percent=40.0,
+            memory_usage_percent=50.0,
+            memory_used_mb=6144,
+            memory_available_mb=2048,
+            disk_usage_percent=60.0,
+            disk_free_gb=400,
+            active_sessions=0
+        )
+        
+        recent_metrics = PerformanceMetrics(
+            timestamp=datetime.now() - timedelta(minutes=30),
+            cpu_usage_percent=60.0,
+            memory_usage_percent=70.0,
+            memory_used_mb=8192,
+            memory_available_mb=4096,
+            disk_usage_percent=80.0,
+            disk_free_gb=200,
+            active_sessions=2
+        )
+        
+        self.monitoring_service._metrics_history.extend([old_metrics, recent_metrics])
+        
+        # Test filtering by time
+        recent_history = self.monitoring_service.get_metrics_history(hours=1)
+        self.assertEqual(len(recent_history), 1)
+        self.assertEqual(recent_history[0].cpu_usage_percent, 60.0)
+        
+        # Test with limit
+        limited_history = self.monitoring_service.get_metrics_history(hours=3, limit=1)
+        self.assertEqual(len(limited_history), 1)
 
 
 if __name__ == '__main__':

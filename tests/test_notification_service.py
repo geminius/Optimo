@@ -329,6 +329,170 @@ class TestNotificationService(unittest.TestCase):
         # Verify all notifications and alerts were created
         self.assertEqual(len(self.service._notifications), 10)
         self.assertEqual(len(self.service._alerts), 10)
+    
+    def test_callback_error_handling(self):
+        """Test error handling when subscriber callbacks fail."""
+        # Create a failing callback
+        def failing_callback(data):
+            raise Exception("Callback error")
+        
+        # Create a working callback
+        working_callback = Mock()
+        
+        # Subscribe both callbacks
+        self.service.subscribe('notification', failing_callback)
+        self.service.subscribe('notification', working_callback)
+        
+        # Send notification - should not raise exception despite failing callback
+        self.service.send_notification(NotificationType.INFO, "Test", "Message")
+        
+        # Working callback should still be called
+        working_callback.assert_called_once()
+        
+        # Notification should still be stored
+        self.assertEqual(len(self.service._notifications), 1)
+    
+    def test_progress_edge_cases(self):
+        """Test edge cases in progress tracking."""
+        session_id = "test_session"
+        
+        # Start progress tracking
+        self.service.start_progress_tracking(session_id, 3, "Starting")
+        
+        # Test updating progress beyond total steps
+        self.service.update_progress(session_id, 5, "Beyond total")
+        progress = self.service.get_progress(session_id)
+        self.assertEqual(progress.current_step, 5)
+        self.assertGreater(progress.progress_percentage, 100.0)
+        
+        # Test updating with negative step
+        self.service.update_progress(session_id, -1, "Negative step")
+        progress = self.service.get_progress(session_id)
+        self.assertEqual(progress.current_step, -1)
+        
+        # Clean up
+        self.service.complete_progress_tracking(session_id)
+    
+    def test_notification_metadata_handling(self):
+        """Test notification metadata handling."""
+        # Test with None metadata
+        notification_id = self.service.send_notification(
+            NotificationType.INFO,
+            "Test",
+            "Message",
+            metadata=None
+        )
+        
+        notification = self.service._notifications[0]
+        self.assertEqual(notification.metadata, {})
+        
+        # Test with complex metadata
+        complex_metadata = {
+            "nested": {"key": "value"},
+            "list": [1, 2, 3],
+            "number": 42,
+            "boolean": True
+        }
+        
+        self.service.send_notification(
+            NotificationType.WARNING,
+            "Complex Test",
+            "Message",
+            metadata=complex_metadata
+        )
+        
+        notification = self.service._notifications[1]
+        self.assertEqual(notification.metadata, complex_metadata)
+    
+    def test_alert_metadata_handling(self):
+        """Test alert metadata handling."""
+        # Test with None metadata
+        alert_id = self.service.create_alert(
+            AlertSeverity.LOW,
+            "Test Alert",
+            "Description",
+            metadata=None
+        )
+        
+        alert = self.service._alerts[0]
+        self.assertEqual(alert.metadata, {})
+        
+        # Test with complex metadata
+        complex_metadata = {
+            "error_details": {"code": 500, "message": "Internal error"},
+            "stack_trace": ["line1", "line2", "line3"],
+            "timestamp": "2023-01-01T00:00:00Z"
+        }
+        
+        self.service.create_alert(
+            AlertSeverity.CRITICAL,
+            "Complex Alert",
+            "Description",
+            metadata=complex_metadata
+        )
+        
+        alert = self.service._alerts[1]
+        self.assertEqual(alert.metadata, complex_metadata)
+    
+    def test_progress_metadata_updates(self):
+        """Test progress metadata updates."""
+        session_id = "test_session"
+        
+        # Start progress tracking
+        self.service.start_progress_tracking(session_id, 3, "Starting")
+        
+        # Update progress with metadata
+        metadata1 = {"step_details": "Processing data"}
+        self.service.update_progress(session_id, 1, "Step 1", metadata1)
+        
+        progress = self.service.get_progress(session_id)
+        self.assertEqual(progress.metadata, metadata1)
+        
+        # Update progress with additional metadata
+        metadata2 = {"step_details": "Analyzing results", "items_processed": 100}
+        self.service.update_progress(session_id, 2, "Step 2", metadata2)
+        
+        progress = self.service.get_progress(session_id)
+        # Should contain both old and new metadata
+        self.assertEqual(progress.metadata["step_details"], "Analyzing results")
+        self.assertEqual(progress.metadata["items_processed"], 100)
+        
+        # Clean up
+        self.service.complete_progress_tracking(session_id)
+    
+    def test_notification_counter_increment(self):
+        """Test that notification counter increments correctly."""
+        # Send multiple notifications
+        id1 = self.service.send_notification(NotificationType.INFO, "Test 1", "Message 1")
+        id2 = self.service.send_notification(NotificationType.INFO, "Test 2", "Message 2")
+        id3 = self.service.send_notification(NotificationType.INFO, "Test 3", "Message 3")
+        
+        # Verify IDs are different and incrementing
+        self.assertNotEqual(id1, id2)
+        self.assertNotEqual(id2, id3)
+        self.assertNotEqual(id1, id3)
+        
+        # Verify ID format
+        self.assertTrue(id1.startswith("notif_"))
+        self.assertTrue(id2.startswith("notif_"))
+        self.assertTrue(id3.startswith("notif_"))
+    
+    def test_alert_counter_increment(self):
+        """Test that alert counter increments correctly."""
+        # Create multiple alerts
+        id1 = self.service.create_alert(AlertSeverity.LOW, "Alert 1", "Description 1")
+        id2 = self.service.create_alert(AlertSeverity.MEDIUM, "Alert 2", "Description 2")
+        id3 = self.service.create_alert(AlertSeverity.HIGH, "Alert 3", "Description 3")
+        
+        # Verify IDs are different and incrementing
+        self.assertNotEqual(id1, id2)
+        self.assertNotEqual(id2, id3)
+        self.assertNotEqual(id1, id3)
+        
+        # Verify ID format
+        self.assertTrue(id1.startswith("alert_"))
+        self.assertTrue(id2.startswith("alert_"))
+        self.assertTrue(id3.startswith("alert_"))
 
 
 if __name__ == '__main__':

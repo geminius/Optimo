@@ -369,7 +369,7 @@ class EvaluationAgent(BaseEvaluationAgent):
             "device": str(self.device)
         }
         
-        return max(0, memory_usage_mb), "MB", False, metadata  # Lower is better
+        return max(0.0, memory_usage_mb), "MB", False, metadata  # Lower is better
     
     def _benchmark_throughput(self, model: torch.nn.Module, 
                              config: Dict[str, Any]) -> Tuple[float, str, bool, Dict[str, Any]]:

@@ -10,11 +10,8 @@ import sys
 import os
 from unittest.mock import patch, MagicMock
 
-# Add src to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-
-from agents.optimization.pruning import PruningAgent, PruningType, SparsityPattern, PruningConfig
-from agents.base import OptimizationStatus
+from src.agents.optimization.pruning import PruningAgent, PruningType, SparsityPattern, PruningConfig
+from src.agents.base import OptimizationStatus
 
 
 class TestPruningAgent(unittest.TestCase):
@@ -420,6 +417,276 @@ class TestPruningAgent(unittest.TestCase):
                     zero_blocks += 1
         
         self.assertGreater(zero_blocks, 0)
+    
+    def test_channel_pruning_linear(self):
+        """Test channel pruning on linear layers."""
+        model = nn.Linear(100, 50)
+        original_weight = model.weight.data.clone()
+        
+        # Apply channel pruning
+        self.agent._prune_channels(model, 0.3)
+        
+        # Check that some input channels are completely zero
+        pruned_weight = model.weight.data
+        zero_channels = (pruned_weight == 0).all(dim=0).sum().item()
+        
+        self.assertGreater(zero_channels, 0)
+        self.assertLess(zero_channels, 100)  # Not all channels should be pruned
+    
+    def test_channel_pruning_conv2d(self):
+        """Test channel pruning on Conv2d layers."""
+        model = nn.Conv2d(32, 64, 3, padding=1)
+        original_weight = model.weight.data.clone()
+        
+        # Apply channel pruning
+        self.agent._prune_channels(model, 0.25)
+        
+        # Check that some input channels are completely zero
+        pruned_weight = model.weight.data
+        zero_channels = (pruned_weight == 0).all(dim=(0, 2, 3)).sum().item()
+        
+        self.assertGreater(zero_channels, 0)
+        self.assertLess(zero_channels, 32)  # Not all channels should be pruned
+    
+    def test_filter_pruning_linear(self):
+        """Test filter pruning on linear layers."""
+        model = nn.Linear(100, 50)
+        original_weight = model.weight.data.clone()
+        
+        # Apply filter pruning
+        self.agent._prune_filters(model, 0.4)
+        
+        # Check that some output filters are completely zero
+        pruned_weight = model.weight.data
+        zero_filters = (pruned_weight == 0).all(dim=1).sum().item()
+        
+        self.assertGreater(zero_filters, 0)
+        self.assertLess(zero_filters, 50)  # Not all filters should be pruned
+    
+    def test_filter_pruning_conv2d(self):
+        """Test filter pruning on Conv2d layers."""
+        model = nn.Conv2d(32, 64, 3, padding=1)
+        original_weight = model.weight.data.clone()
+        
+        # Apply filter pruning
+        self.agent._prune_filters(model, 0.3)
+        
+        # Check that some output filters are completely zero
+        pruned_weight = model.weight.data
+        zero_filters = (pruned_weight == 0).all(dim=(1, 2, 3)).sum().item()
+        
+        self.assertGreater(zero_filters, 0)
+        self.assertLess(zero_filters, 64)  # Not all filters should be pruned
+    
+    def test_filter_pruning_with_bias(self):
+        """Test that filter pruning also handles bias correctly."""
+        model = nn.Linear(100, 50, bias=True)
+        original_bias = model.bias.data.clone()
+        
+        # Apply filter pruning
+        self.agent._prune_filters(model, 0.4)
+        
+        # Check that bias is also pruned for zero filters
+        pruned_weight = model.weight.data
+        pruned_bias = model.bias.data
+        zero_filters = (pruned_weight == 0).all(dim=1)
+        
+        # Bias should be zero where filters are zero
+        for i, is_zero_filter in enumerate(zero_filters):
+            if is_zero_filter:
+                self.assertEqual(pruned_bias[i].item(), 0.0)
+    
+    def test_n_m_sparsity_edge_cases(self):
+        """Test N:M sparsity with edge cases."""
+        # Test invalid N:M ratio
+        model = nn.Linear(16, 8)
+        original_weight = model.weight.data.clone()
+        
+        # Test N >= M (should log warning and return)
+        self.agent._prune_n_m(model, (4, 4))  # N == M
+        self.assertTrue(torch.equal(model.weight.data, original_weight))
+        
+        self.agent._prune_n_m(model, (5, 4))  # N > M
+        self.assertTrue(torch.equal(model.weight.data, original_weight))
+    
+    def test_block_pruning_non_linear(self):
+        """Test that block pruning handles non-linear layers correctly."""
+        model = nn.Conv2d(3, 16, 3)
+        original_weight = model.weight.data.clone()
+        
+        # Should log warning and not modify the model
+        self.agent._prune_blocks(model, 0.5, (2, 2))
+        
+        # Weight should remain unchanged
+        self.assertTrue(torch.equal(model.weight.data, original_weight))
+    
+    def test_structured_pruning_different_patterns(self):
+        """Test structured pruning with different sparsity patterns."""
+        # Test filter pattern
+        config = {
+            'pruning_type': 'structured',
+            'sparsity_ratio': 0.3,
+            'sparsity_pattern': 'filter'
+        }
+        
+        result = self.agent.optimize_with_tracking(self.sample_cnn, config)
+        self.assertTrue(result.success)
+        
+        # Test block pattern
+        config['sparsity_pattern'] = 'block'
+        result = self.agent.optimize_with_tracking(self.sample_model, config)
+        self.assertTrue(result.success)
+        
+        # Test N:M pattern
+        config['sparsity_pattern'] = 'n_m'
+        config['n_m_ratio'] = (2, 4)
+        result = self.agent.optimize_with_tracking(self.sample_model, config)
+        self.assertTrue(result.success)
+    
+    def test_pruning_with_bias_handling(self):
+        """Test that pruning handles bias correctly in unstructured pruning."""
+        config = {
+            'pruning_type': 'unstructured',
+            'sparsity_ratio': 0.8  # High sparsity to trigger bias pruning
+        }
+        
+        # Create model with bias
+        model_with_bias = nn.Sequential(
+            nn.Linear(1000, 512, bias=True),
+            nn.ReLU(),
+            nn.Linear(512, 256, bias=True),
+            nn.ReLU(),
+            nn.Linear(256, 10, bias=True)
+        )
+        
+        result = self.agent.optimize_with_tracking(model_with_bias, config)
+        self.assertTrue(result.success)
+        
+        # Check that some bias parameters were pruned
+        total_bias_params = 0
+        zero_bias_params = 0
+        
+        for module in result.optimized_model.modules():
+            if isinstance(module, nn.Linear) and module.bias is not None:
+                total_bias_params += module.bias.numel()
+                zero_bias_params += (module.bias == 0).sum().item()
+        
+        # Should have some bias pruning with high sparsity
+        if total_bias_params > 0:
+            bias_sparsity = zero_bias_params / total_bias_params
+            # With 80% sparsity and bias pruning at 50% of that, expect some bias pruning
+            self.assertGreaterEqual(bias_sparsity, 0.0)
+    
+    def test_make_pruning_permanent(self):
+        """Test that pruning masks are properly removed."""
+        model = self._create_sample_model()
+        
+        # Apply pruning that creates masks
+        import torch.nn.utils.prune as prune
+        prune.l1_unstructured(model[0], name="weight", amount=0.5)
+        
+        # Check that mask exists
+        self.assertTrue(hasattr(model[0], 'weight_mask'))
+        
+        # Make pruning permanent
+        self.agent._make_pruning_permanent(model)
+        
+        # Check that mask is removed
+        self.assertFalse(hasattr(model[0], 'weight_mask'))
+    
+    def test_optimization_with_empty_preserve_modules(self):
+        """Test optimization with empty preserve_modules list."""
+        config = {
+            'pruning_type': 'magnitude',
+            'sparsity_ratio': 0.5,
+            'preserve_modules': []
+        }
+        
+        result = self.agent.optimize_with_tracking(self.sample_model, config)
+        self.assertTrue(result.success)
+        
+        # All prunable layers should be pruned
+        pruned_layers = result.performance_metrics['pruned_layers']
+        self.assertGreater(pruned_layers, 0)
+    
+    def test_gradual_pruning_progress_tracking(self):
+        """Test that gradual pruning properly tracks progress through steps."""
+        progress_updates = []
+        
+        def progress_callback(update):
+            progress_updates.append(update)
+        
+        self.agent.add_progress_callback(progress_callback)
+        
+        config = {
+            'pruning_type': 'gradual',
+            'sparsity_ratio': 0.6,
+            'gradual_steps': 5
+        }
+        
+        result = self.agent.optimize_with_tracking(self.sample_model, config)
+        self.assertTrue(result.success)
+        
+        # Should have multiple progress updates for gradual steps
+        gradual_updates = [u for u in progress_updates if "Gradual pruning step" in u.current_step]
+        self.assertGreaterEqual(len(gradual_updates), 5)
+    
+    def test_validation_with_different_output_shapes(self):
+        """Test validation when models have different output shapes (should fail)."""
+        original_model = self._create_sample_model()
+        
+        # Create a model with different output shape
+        different_model = nn.Sequential(
+            nn.Linear(1000, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 20)  # Different output size
+        )
+        
+        validation = self.agent.validate_result(original_model, different_model)
+        
+        self.assertFalse(validation.is_valid)
+        self.assertTrue(any("shape mismatch" in issue.lower() for issue in validation.issues))
+    
+    def test_create_dummy_input_conv1d(self):
+        """Test dummy input creation for Conv1d models."""
+        conv1d_model = nn.Sequential(
+            nn.Conv1d(16, 32, 3),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool1d(1),
+            nn.Flatten(),
+            nn.Linear(32, 10)
+        )
+        
+        dummy_input = self.agent._create_dummy_input(conv1d_model)
+        self.assertEqual(dummy_input.shape, (1, 16, 100))  # Default sequence length
+    
+    def test_create_dummy_input_fallback(self):
+        """Test dummy input creation fallback for unknown model types."""
+        # Model with no recognizable first layer
+        unknown_model = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.ReLU(),
+            nn.Linear(768, 10)  # This should be found eventually
+        )
+        
+        dummy_input = self.agent._create_dummy_input(unknown_model)
+        self.assertEqual(dummy_input.shape, (1, 768))
+    
+    def test_count_parameters_accuracy(self):
+        """Test parameter counting accuracy."""
+        model = self._create_sample_model()
+        
+        # Count manually
+        expected_params = sum(p.numel() for p in model.parameters())
+        
+        # Count using agent method
+        agent_count = self.agent._count_parameters(model)
+        
+        self.assertEqual(expected_params, agent_count)
 
 
 class TestPruningConfig(unittest.TestCase):

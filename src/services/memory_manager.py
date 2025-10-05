@@ -171,23 +171,20 @@ class MemoryManager:
                 # Insert or update session
                 cursor.execute("""
                     INSERT OR REPLACE INTO optimization_sessions 
-                    (id, model_id, status, criteria_name, plan_id, created_at, updated_at, 
-                     started_at, completed_at, created_by, priority, tags, notes, session_data, data_size)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, model_id, status, criteria_name, created_at, 
+                     started_at, completed_at, created_by, priority, tags, session_data, data_size)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     session.id,
                     session.model_id,
                     session.status.value,
                     session.criteria_name,
-                    session.plan_id,
                     session.created_at.isoformat(),
-                    session.updated_at.isoformat(),
                     session.started_at.isoformat() if session.started_at else None,
                     session.completed_at.isoformat() if session.completed_at else None,
                     session.created_by,
                     session.priority,
                     json.dumps(session.tags),
-                    session.notes,
                     session_data,
                     session_size
                 ))
@@ -283,7 +280,7 @@ class MemoryManager:
                 
                 # Build query with filters
                 query = """
-                    SELECT id, model_id, status, criteria_name, created_at, updated_at,
+                    SELECT id, model_id, status, criteria_name, created_at,
                            started_at, completed_at, created_by, priority, tags, data_size
                     FROM optimization_sessions
                     WHERE 1=1
@@ -313,13 +310,12 @@ class MemoryManager:
                         "status": row[2],
                         "criteria_name": row[3],
                         "created_at": row[4],
-                        "updated_at": row[5],
-                        "started_at": row[6],
-                        "completed_at": row[7],
-                        "created_by": row[8],
-                        "priority": row[9],
-                        "tags": json.loads(row[10]) if row[10] else [],
-                        "data_size": row[11]
+                        "started_at": row[5],
+                        "completed_at": row[6],
+                        "created_by": row[7],
+                        "priority": row[8],
+                        "tags": json.loads(row[9]) if row[9] else [],
+                        "data_size": row[10]
                     }
                     sessions.append(session_info)
                 
@@ -390,16 +386,15 @@ class MemoryManager:
             last_checkpoint = session.created_at
             
             for step in session.steps:
-                if step.status in [OptimizationStatus.COMPLETED]:
+                if step.status == "completed":
                     recoverable_steps.append(step.step_id)
-                    if step.end_time:
-                        last_checkpoint = step.end_time
-                elif step.status in [OptimizationStatus.FAILED, OptimizationStatus.CANCELLED]:
+                    # OptimizationStep doesn't have end_time, use created_at as fallback
+                    last_checkpoint = session.created_at
+                elif step.status in ["failed", "cancelled"]:
                     break  # Stop at first failed step
             
-            # Check if recovery is possible
-            if not recoverable_steps and session.status != OptimizationStatus.PENDING:
-                return None
+            # Always return recovery info, even if no steps are recoverable
+            # This allows for session status reset even without completed steps
             
             recovery_info = SessionRecoveryInfo(
                 session_id=session_id,
@@ -441,14 +436,12 @@ class MemoryManager:
             
             # Reset session status for recovery
             session.status = OptimizationStatus.PENDING
-            session.updated_at = datetime.now()
+            session.created_at = datetime.now()
             
             # Reset failed/cancelled steps
             for step in session.steps:
-                if step.status in [OptimizationStatus.FAILED, OptimizationStatus.CANCELLED]:
-                    step.status = OptimizationStatus.PENDING
-                    step.start_time = None
-                    step.end_time = None
+                if step.status in ["failed", "cancelled"]:
+                    step.status = "pending"
                     step.error_message = None
             
             # Store recovered session
@@ -713,15 +706,12 @@ class MemoryManager:
                     model_id TEXT NOT NULL,
                     status TEXT NOT NULL,
                     criteria_name TEXT,
-                    plan_id TEXT,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
                     started_at TEXT,
                     completed_at TEXT,
                     created_by TEXT,
                     priority INTEGER DEFAULT 1,
                     tags TEXT,
-                    notes TEXT,
                     session_data BLOB NOT NULL,
                     data_size INTEGER DEFAULT 0,
                     FOREIGN KEY (model_id) REFERENCES models(id)
@@ -897,7 +887,7 @@ class MemoryManager:
                 session = self._session_cache[session_id]
                 
                 # Check if cache entry is still valid (simple TTL check)
-                cache_age = datetime.now() - session.updated_at
+                cache_age = datetime.now() - session.created_at
                 if cache_age.total_seconds() < self._cache_ttl_minutes * 60:
                     return session
                 else:

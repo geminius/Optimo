@@ -556,6 +556,591 @@ class TestErrorHandling:
         assert "error" in status["agent2"]
 
 
+class TestOrchestrationLogic:
+    """Test orchestration logic and workflow coordination."""
+    
+    def test_execute_analysis_phase(self, optimization_manager, test_model_path):
+        """Test analysis phase execution."""
+        session_id = "test_session"
+        
+        # Setup session state
+        optimization_manager.workflow_states[session_id] = WorkflowState(
+            session_id=session_id,
+            status=WorkflowStatus.INITIALIZING
+        )
+        optimization_manager.session_snapshots[session_id] = []
+        
+        # Mock analysis agent
+        mock_analysis_report = Mock()
+        mock_analysis_agent = Mock()
+        mock_analysis_agent.analyze_model.return_value = mock_analysis_report
+        optimization_manager.analysis_agent = mock_analysis_agent
+        
+        # Execute analysis phase
+        result = optimization_manager._execute_analysis_phase(session_id, test_model_path)
+        
+        assert result == mock_analysis_report
+        mock_analysis_agent.analyze_model.assert_called_once_with(test_model_path)
+        
+        # Verify workflow state updated
+        workflow_state = optimization_manager.workflow_states[session_id]
+        assert workflow_state.status == WorkflowStatus.ANALYZING
+        assert workflow_state.progress_percentage == 10.0
+        
+        # Verify snapshot created
+        assert len(optimization_manager.session_snapshots[session_id]) == 1
+    
+    def test_execute_planning_phase(self, optimization_manager, optimization_criteria):
+        """Test planning phase execution."""
+        session_id = "test_session"
+        
+        # Setup session and workflow state
+        from src.models.core import OptimizationSession
+        session = OptimizationSession(
+            id=session_id,
+            model_id="test_model",
+            status=SessionStatus.RUNNING,
+            criteria_name=optimization_criteria.name,
+            created_by="test"
+        )
+        optimization_manager.active_sessions[session_id] = session
+        optimization_manager.workflow_states[session_id] = WorkflowState(
+            session_id=session_id,
+            status=WorkflowStatus.ANALYZING
+        )
+        optimization_manager.session_snapshots[session_id] = []
+        
+        # Mock planning agent
+        mock_analysis_report = Mock()
+        mock_optimization_plan = Mock()
+        mock_optimization_plan.plan_id = "test_plan"
+        mock_optimization_plan.steps = []
+        
+        mock_planning_agent = Mock()
+        mock_planning_agent.plan_optimization.return_value = mock_optimization_plan
+        mock_planning_agent.validate_plan.return_value = Mock(is_valid=True)
+        optimization_manager.planning_agent = mock_planning_agent
+        
+        # Execute planning phase
+        result = optimization_manager._execute_planning_phase(
+            session_id, mock_analysis_report, optimization_criteria
+        )
+        
+        assert result == mock_optimization_plan
+        mock_planning_agent.plan_optimization.assert_called_once_with(mock_analysis_report, optimization_criteria)
+        mock_planning_agent.validate_plan.assert_called_once_with(mock_optimization_plan)
+        
+        # Verify session updated with plan
+        assert session.plan_id == "test_plan"
+        
+        # Verify workflow state updated
+        workflow_state = optimization_manager.workflow_states[session_id]
+        assert workflow_state.status == WorkflowStatus.PLANNING
+        assert workflow_state.progress_percentage == 25.0
+    
+    def test_execute_planning_phase_invalid_plan(self, optimization_manager, optimization_criteria):
+        """Test planning phase with invalid plan."""
+        session_id = "test_session"
+        
+        # Setup session state
+        optimization_manager.active_sessions[session_id] = Mock()
+        optimization_manager.workflow_states[session_id] = WorkflowState(
+            session_id=session_id,
+            status=WorkflowStatus.ANALYZING
+        )
+        
+        # Mock planning agent with invalid plan
+        mock_analysis_report = Mock()
+        mock_optimization_plan = Mock()
+        
+        mock_planning_agent = Mock()
+        mock_planning_agent.plan_optimization.return_value = mock_optimization_plan
+        mock_planning_agent.validate_plan.return_value = Mock(
+            is_valid=False, 
+            issues=["Invalid constraint"]
+        )
+        optimization_manager.planning_agent = mock_planning_agent
+        
+        # Execute planning phase should raise error
+        with pytest.raises(RuntimeError, match="Invalid optimization plan"):
+            optimization_manager._execute_planning_phase(
+                session_id, mock_analysis_report, optimization_criteria
+            )
+    
+    @patch('src.services.optimization_manager.OptimizationManager._load_model')
+    def test_execute_optimization_phase(self, mock_load_model, optimization_manager, test_model):
+        """Test optimization phase execution."""
+        session_id = "test_session"
+        model_path = "test_model.pt"
+        
+        # Setup session and workflow state
+        from src.models.core import OptimizationSession
+        session = OptimizationSession(
+            id=session_id,
+            model_id=model_path,
+            status=SessionStatus.RUNNING,
+            criteria_name="test_criteria",
+            created_by="test"
+        )
+        optimization_manager.active_sessions[session_id] = session
+        optimization_manager.workflow_states[session_id] = WorkflowState(
+            session_id=session_id,
+            status=WorkflowStatus.PLANNING
+        )
+        optimization_manager.session_snapshots[session_id] = []
+        
+        # Mock model loading
+        mock_load_model.return_value = test_model
+        
+        # Create mock optimization plan
+        from src.agents.planning.agent import OptimizationPlan, OptimizationStep
+        plan_step = OptimizationStep(
+            step_id="step_1",
+            technique="quantization",
+            parameters={"bits": 8}
+        )
+        optimization_plan = OptimizationPlan(
+            plan_id="test_plan",
+            steps=[plan_step],
+            expected_improvements={}
+        )
+        
+        # Mock optimization agent
+        mock_optimization_result = OptimizationResult(
+            success=True,
+            optimized_model=test_model,
+            original_model=test_model,
+            optimization_metadata={"technique": "quantization"},
+            performance_metrics={"size_reduction": 0.5},
+            optimization_time=30.0,
+            technique_used="quantization",
+            validation_result=Mock(is_valid=True)
+        )
+        
+        mock_agent = Mock()
+        mock_agent.optimize_with_tracking.return_value = mock_optimization_result
+        mock_agent.add_progress_callback = Mock()
+        mock_agent.remove_progress_callback = Mock()
+        optimization_manager.optimization_agents["quantization"] = mock_agent
+        
+        # Execute optimization phase
+        result = optimization_manager._execute_optimization_phase(
+            session_id, model_path, optimization_plan
+        )
+        
+        assert result["original_model_path"] == model_path
+        assert result["final_model"] == test_model
+        assert len(result["step_results"]) == 1
+        assert result["step_results"][0] == mock_optimization_result
+        assert "quantization" in result["optimized_models"]
+        
+        # Verify agent was called correctly
+        mock_agent.optimize_with_tracking.assert_called_once()
+        mock_agent.add_progress_callback.assert_called_once()
+        mock_agent.remove_progress_callback.assert_called_once()
+    
+    @patch('src.services.optimization_manager.OptimizationManager._load_model')
+    def test_execute_optimization_phase_with_failure(self, mock_load_model, optimization_manager, test_model):
+        """Test optimization phase with step failure."""
+        session_id = "test_session"
+        model_path = "test_model.pt"
+        
+        # Setup session
+        from src.models.core import OptimizationSession
+        session = OptimizationSession(
+            id=session_id,
+            model_id=model_path,
+            status=SessionStatus.RUNNING,
+            criteria_name="test_criteria",
+            created_by="test"
+        )
+        # Add a step to the session
+        from src.models.core import OptimizationStep as SessionStep
+        session.steps = [SessionStep(technique="quantization")]
+        
+        optimization_manager.active_sessions[session_id] = session
+        optimization_manager.workflow_states[session_id] = WorkflowState(
+            session_id=session_id,
+            status=WorkflowStatus.EXECUTING
+        )
+        optimization_manager.session_snapshots[session_id] = []
+        
+        # Mock model loading
+        mock_load_model.return_value = test_model
+        
+        # Create mock optimization plan
+        from src.agents.planning.agent import OptimizationPlan, OptimizationStep
+        plan_step = OptimizationStep(
+            step_id="step_1",
+            technique="quantization",
+            parameters={"bits": 8}
+        )
+        optimization_plan = OptimizationPlan(
+            plan_id="test_plan",
+            steps=[plan_step],
+            expected_improvements={}
+        )
+        
+        # Mock optimization agent with failure
+        mock_optimization_result = OptimizationResult(
+            success=False,
+            optimized_model=None,
+            original_model=test_model,
+            optimization_metadata={},
+            performance_metrics={},
+            optimization_time=0.0,
+            technique_used="quantization",
+            validation_result=None,
+            error_message="Quantization failed"
+        )
+        
+        mock_agent = Mock()
+        mock_agent.optimize_with_tracking.return_value = mock_optimization_result
+        mock_agent.add_progress_callback = Mock()
+        mock_agent.remove_progress_callback = Mock()
+        optimization_manager.optimization_agents["quantization"] = mock_agent
+        
+        # Execute optimization phase
+        result = optimization_manager._execute_optimization_phase(
+            session_id, model_path, optimization_plan
+        )
+        
+        assert result["final_model"] == test_model  # Should revert to original
+        assert len(result["step_results"]) == 1
+        assert not result["step_results"][0].success
+        
+        # Verify session step marked as failed (if auto_rollback is False)
+        if not optimization_manager.auto_rollback_on_failure:
+            assert session.steps[0].status == SessionStatus.FAILED
+            assert session.steps[0].error_message == "Quantization failed"
+    
+    def test_execute_evaluation_phase(self, optimization_manager):
+        """Test evaluation phase execution."""
+        session_id = "test_session"
+        
+        # Setup workflow state
+        optimization_manager.workflow_states[session_id] = WorkflowState(
+            session_id=session_id,
+            status=WorkflowStatus.EXECUTING
+        )
+        optimization_manager.session_snapshots[session_id] = []
+        
+        # Mock optimization results
+        mock_final_model = Mock()
+        mock_original_model = Mock()
+        optimization_results = {
+            "final_model": mock_final_model,
+            "original_model_path": "original_model.pt",
+            "step_results": [Mock(), Mock()]
+        }
+        
+        # Mock evaluation agent
+        mock_comparison_result = Mock()
+        mock_evaluation_report = Mock()
+        mock_evaluation_report.comparison_baseline = mock_comparison_result
+        mock_evaluation_report.model_id = f"{session_id}_optimized"
+        mock_evaluation_report.session_id = session_id
+        
+        mock_evaluation_agent = Mock()
+        mock_evaluation_agent.compare_models.return_value = mock_comparison_result
+        mock_evaluation_agent.evaluate_model.return_value = mock_evaluation_report
+        optimization_manager.evaluation_agent = mock_evaluation_agent
+        
+        # Mock model loading
+        with patch.object(optimization_manager, '_load_model', return_value=mock_original_model):
+            with patch.object(optimization_manager, '_get_standard_benchmarks', return_value=[]):
+                result = optimization_manager._execute_evaluation_phase(session_id, optimization_results)
+        
+        assert result == mock_evaluation_report
+        mock_evaluation_agent.compare_models.assert_called_once_with(mock_original_model, mock_final_model)
+        mock_evaluation_agent.evaluate_model.assert_called_once_with(mock_final_model, [])
+        
+        # Verify workflow state updated
+        workflow_state = optimization_manager.workflow_states[session_id]
+        assert workflow_state.status == WorkflowStatus.EVALUATING
+        assert workflow_state.progress_percentage == 85.0
+    
+    def test_execute_evaluation_phase_no_final_model(self, optimization_manager):
+        """Test evaluation phase with no final model."""
+        session_id = "test_session"
+        
+        # Setup workflow state
+        optimization_manager.workflow_states[session_id] = WorkflowState(
+            session_id=session_id,
+            status=WorkflowStatus.EXECUTING
+        )
+        
+        # Mock optimization results without final model
+        optimization_results = {
+            "final_model": None,
+            "original_model_path": "original_model.pt"
+        }
+        
+        # Execute evaluation phase should raise error
+        with pytest.raises(RuntimeError, match="No final optimized model available"):
+            optimization_manager._execute_evaluation_phase(session_id, optimization_results)
+    
+    def test_execute_optimization_step_missing_agent(self, optimization_manager, test_model):
+        """Test optimization step with missing agent."""
+        session_id = "test_session"
+        
+        from src.agents.planning.agent import OptimizationStep
+        plan_step = OptimizationStep(
+            step_id="step_1",
+            technique="missing_technique",
+            parameters={}
+        )
+        
+        result = optimization_manager._execute_optimization_step(session_id, test_model, plan_step)
+        
+        assert not result.success
+        assert result.error_message == "Optimization agent for technique 'missing_technique' not available"
+        assert result.original_model == test_model
+        assert result.optimized_model is None
+    
+    def test_execute_optimization_step_agent_exception(self, optimization_manager, test_model):
+        """Test optimization step with agent exception."""
+        session_id = "test_session"
+        
+        from src.agents.planning.agent import OptimizationStep
+        plan_step = OptimizationStep(
+            step_id="step_1",
+            technique="quantization",
+            parameters={}
+        )
+        
+        # Mock agent that raises exception
+        mock_agent = Mock()
+        mock_agent.optimize_with_tracking.side_effect = Exception("Agent error")
+        mock_agent.add_progress_callback = Mock()
+        mock_agent.remove_progress_callback = Mock()
+        optimization_manager.optimization_agents["quantization"] = mock_agent
+        
+        result = optimization_manager._execute_optimization_step(session_id, test_model, plan_step)
+        
+        assert not result.success
+        assert result.error_message == "Agent error"
+        assert result.original_model == test_model
+        assert result.optimized_model is None
+    
+    def test_complete_session(self, optimization_manager, test_model_path, optimization_criteria):
+        """Test session completion."""
+        session_id = "test_session"
+        
+        # Setup session and workflow state
+        from src.models.core import OptimizationSession
+        session = OptimizationSession(
+            id=session_id,
+            model_id=test_model_path,
+            status=SessionStatus.RUNNING,
+            criteria_name=optimization_criteria.name,
+            created_by="test"
+        )
+        # Add completed steps
+        from src.models.core import OptimizationStep
+        session.steps = [
+            OptimizationStep(technique="quantization"),
+            OptimizationStep(technique="pruning")
+        ]
+        
+        optimization_manager.active_sessions[session_id] = session
+        optimization_manager.workflow_states[session_id] = WorkflowState(
+            session_id=session_id,
+            status=WorkflowStatus.EVALUATING
+        )
+        
+        # Mock optimization results and evaluation report
+        optimization_results = {
+            "step_results": [Mock(), Mock()]
+        }
+        
+        mock_evaluation_report = Mock()
+        mock_evaluation_report.validation_status = Mock()
+        mock_evaluation_report.validation_status.value = "passed"
+        mock_evaluation_report.comparison_baseline = Mock()
+        mock_evaluation_report.comparison_baseline.improvements = {"size": 0.5}
+        
+        # Execute completion
+        optimization_manager._complete_session(session_id, optimization_results, mock_evaluation_report)
+        
+        # Verify session completed
+        assert session.status == SessionStatus.COMPLETED
+        assert session.completed_at is not None
+        assert session.results is not None
+        assert session.results.techniques_applied == ["quantization", "pruning"]
+        assert session.results.validation_passed is True
+        
+        # Verify workflow state
+        workflow_state = optimization_manager.workflow_states[session_id]
+        assert workflow_state.status == WorkflowStatus.COMPLETED
+        assert workflow_state.progress_percentage == 100.0
+    
+    def test_convert_plan_step_to_session_step(self, optimization_manager):
+        """Test converting plan step to session step."""
+        from src.agents.planning.agent import OptimizationStep as PlanStep
+        
+        plan_step = PlanStep(
+            step_id="step_1",
+            technique="quantization",
+            parameters={"bits": 8}
+        )
+        
+        session_step = optimization_manager._convert_plan_step_to_session_step(plan_step)
+        
+        assert session_step.step_id == "step_1"
+        assert session_step.technique == "quantization"
+        assert session_step.parameters == {"bits": 8}
+        assert session_step.status == SessionStatus.PENDING
+
+
+class TestRecoveryMechanisms:
+    """Test error recovery and graceful degradation mechanisms."""
+    
+    @patch('src.services.optimization_manager.recovery_manager')
+    @patch('src.services.optimization_manager.RetryableOperation')
+    def test_execute_analysis_phase_with_recovery(self, mock_retry_op, mock_recovery, 
+                                                 optimization_manager, test_model_path):
+        """Test analysis phase with recovery mechanisms."""
+        session_id = "test_session"
+        recovery_context = {"session_id": session_id}
+        
+        # Mock analysis phase to succeed
+        mock_analysis_report = Mock()
+        mock_retry_instance = Mock()
+        mock_retry_instance.execute.return_value = mock_analysis_report
+        mock_retry_op.return_value = mock_retry_instance
+        
+        with patch.object(optimization_manager, '_execute_analysis_phase', return_value=mock_analysis_report):
+            result = optimization_manager._execute_analysis_phase_with_recovery(
+                session_id, test_model_path, recovery_context
+            )
+        
+        assert result == mock_analysis_report
+        mock_retry_op.assert_called_once()
+        mock_retry_instance.execute.assert_called_once()
+    
+    @patch('src.services.optimization_manager.recovery_manager')
+    def test_execute_planning_phase_with_recovery_success(self, mock_recovery, optimization_manager):
+        """Test planning phase with recovery - success case."""
+        session_id = "test_session"
+        mock_analysis_report = Mock()
+        mock_criteria = Mock()
+        recovery_context = {"session_id": session_id}
+        
+        # Mock planning phase to succeed
+        mock_plan = Mock()
+        with patch.object(optimization_manager, '_execute_planning_phase', return_value=mock_plan):
+            result = optimization_manager._execute_planning_phase_with_recovery(
+                session_id, mock_analysis_report, mock_criteria, recovery_context
+            )
+        
+        assert result == mock_plan
+        mock_recovery.handle_error.assert_not_called()
+    
+    @patch('src.services.optimization_manager.recovery_manager')
+    def test_execute_planning_phase_with_recovery_failure(self, mock_recovery, optimization_manager):
+        """Test planning phase with recovery - failure and recovery."""
+        session_id = "test_session"
+        mock_analysis_report = Mock()
+        mock_criteria = Mock()
+        recovery_context = {"session_id": session_id}
+        
+        # Mock planning phase to fail first, then succeed
+        mock_plan = Mock()
+        planning_calls = [Exception("Planning failed"), mock_plan]
+        
+        with patch.object(optimization_manager, '_execute_planning_phase', side_effect=planning_calls):
+            mock_recovery.handle_error.return_value = True  # Recovery successful
+            
+            result = optimization_manager._execute_planning_phase_with_recovery(
+                session_id, mock_analysis_report, mock_criteria, recovery_context
+            )
+        
+        assert result == mock_plan
+        mock_recovery.handle_error.assert_called_once()
+    
+    @patch('src.services.optimization_manager.degradation_manager')
+    def test_execute_optimization_phase_with_graceful_degradation(self, mock_degradation, 
+                                                                 optimization_manager):
+        """Test optimization phase with graceful degradation."""
+        session_id = "test_session"
+        model_path = "test_model.pt"
+        optimization_plan = {"techniques": ["quantization", "pruning"]}
+        recovery_context = {"session_id": session_id}
+        
+        # Mock original plan to fail
+        original_error = Exception("Original plan failed")
+        original_error.context = {"technique": "quantization"}
+        
+        # Mock degraded plan to succeed
+        mock_result = {"success": True, "degraded": True}
+        
+        with patch.object(optimization_manager, '_execute_optimization_phase', 
+                         side_effect=[original_error, mock_result]):
+            # Mock degradation manager
+            mock_degradation.create_degraded_plan.return_value = ["pruning"]
+            optimization_manager.optimization_agents = {"quantization": Mock(), "pruning": Mock()}
+            
+            result = optimization_manager._execute_optimization_phase_with_recovery(
+                session_id, model_path, optimization_plan, recovery_context
+            )
+        
+        assert result["degraded"] is True
+        assert result["original_techniques"] == ["quantization", "pruning"]
+        assert result["failed_techniques"] == ["quantization"]
+        mock_degradation.create_degraded_plan.assert_called_once()
+    
+    def test_execute_minimal_evaluation(self, optimization_manager):
+        """Test minimal evaluation fallback."""
+        session_id = "test_session"
+        
+        # Mock optimization results with final model
+        mock_model = Mock()
+        mock_model.parameters.return_value = [Mock(numel=Mock(return_value=1000))]
+        
+        optimization_results = {
+            "final_model": mock_model,
+            "techniques_applied": ["quantization"],
+            "total_time": 120.0
+        }
+        
+        result = optimization_manager._execute_minimal_evaluation(session_id, optimization_results)
+        
+        assert result["evaluation_status"] == "minimal"
+        assert result["basic_metrics"]["optimization_completed"] is True
+        assert result["basic_metrics"]["model_parameters"] == 1000
+        assert result["basic_metrics"]["techniques_applied"] == ["quantization"]
+        assert result["basic_metrics"]["optimization_time"] == 120.0
+        assert "warnings" in result
+    
+    def test_execute_minimal_evaluation_no_model(self, optimization_manager):
+        """Test minimal evaluation with no model."""
+        session_id = "test_session"
+        optimization_results = {"final_model": None}
+        
+        result = optimization_manager._execute_minimal_evaluation(session_id, optimization_results)
+        
+        assert result["evaluation_status"] == "minimal"
+        assert result["basic_metrics"]["optimization_completed"] is False
+        assert "error_message" in result
+    
+    def test_execute_minimal_evaluation_model_error(self, optimization_manager):
+        """Test minimal evaluation with model error."""
+        session_id = "test_session"
+        
+        # Mock model that raises exception
+        mock_model = Mock()
+        mock_model.parameters.side_effect = Exception("Model error")
+        
+        optimization_results = {"final_model": mock_model}
+        
+        result = optimization_manager._execute_minimal_evaluation(session_id, optimization_results)
+        
+        assert result["evaluation_status"] == "failed"
+        assert result["basic_metrics"]["optimization_completed"] is False
+        assert "Model error" in result["error_message"]
+
+
 class TestIntegration:
     """Integration tests for OptimizationManager."""
     

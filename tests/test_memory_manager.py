@@ -60,32 +60,23 @@ class TestMemoryManager:
             model_id="test-model-456",
             status=OptimizationStatus.PENDING,
             criteria_name="test-criteria",
-            plan_id="test-plan-789",
             created_by="test-user",
             priority=1,
-            tags=["test", "robotics"],
-            notes="Test session for unit tests"
+            tags=["test", "robotics"]
         )
         
         # Add some steps
         step1 = OptimizationStep(
             step_id="step-1",
             technique="quantization",
-            status=OptimizationStatus.COMPLETED,
-            start_time=datetime.now() - timedelta(minutes=10),
-            end_time=datetime.now() - timedelta(minutes=5),
-            duration_seconds=300.0,
-            parameters={"bits": 8, "method": "dynamic"},
-            results={"size_reduction": 0.5, "accuracy_loss": 0.02}
+            status="completed",
+            parameters={"bits": 8, "method": "dynamic"}
         )
         
         step2 = OptimizationStep(
             step_id="step-2",
             technique="pruning",
-            status=OptimizationStatus.FAILED,
-            start_time=datetime.now() - timedelta(minutes=5),
-            end_time=datetime.now() - timedelta(minutes=2),
-            duration_seconds=180.0,
+            status="failed",
             parameters={"sparsity": 0.3, "structured": True},
             error_message="Pruning failed due to incompatible architecture"
         )
@@ -408,7 +399,7 @@ class TestMemoryManager:
             time.sleep(1)
             
             # Update session timestamp to simulate age
-            sample_session.updated_at = datetime.now() - timedelta(minutes=5)
+            sample_session.created_at = datetime.now() - timedelta(minutes=5)
             manager._update_session_cache(sample_session)
             
             # Next retrieval should hit database (cache expired)
@@ -475,7 +466,6 @@ class TestMemoryManager:
             id="edge-case-session",
             model_id="edge-model",
             status=OptimizationStatus.PENDING,
-            plan_id=None,
             started_at=None,
             completed_at=None,
             results=None
@@ -485,7 +475,6 @@ class TestMemoryManager:
         assert memory_manager.store_session(session)
         retrieved = memory_manager.retrieve_session(session.id)
         assert retrieved is not None
-        assert retrieved.plan_id is None
         assert retrieved.started_at is None
         assert retrieved.results is None
     
@@ -501,19 +490,310 @@ class TestMemoryManager:
     
     def test_large_session_handling(self, memory_manager):
         """Test handling of large sessions."""
-        # Create session with large data
+        # Create session with large data (using criteria_name for large text)
         large_session = OptimizationSession(
             id="large-session",
             model_id="large-model",
             status=OptimizationStatus.PENDING,
-            notes="x" * 1000000  # 1MB of text
+            criteria_name="x" * 1000000  # 1MB of text
         )
         
         # Should handle large sessions (within limits)
         assert memory_manager.store_session(large_session)
         retrieved = memory_manager.retrieve_session(large_session.id)
         assert retrieved is not None
-        assert len(retrieved.notes) == 1000000
+        assert len(retrieved.criteria_name) == 1000000
+    
+    def test_get_connection_context_manager(self, memory_manager):
+        """Test database connection context manager."""
+        # Test successful connection
+        with memory_manager.get_connection() as conn:
+            assert conn is not None
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            result = cursor.fetchone()
+            assert result[0] == 1
+        
+        # Connection should still be available after context exit
+        # (thread-local connections are reused)
+        with memory_manager.get_connection() as conn2:
+            assert conn2 is not None
+    
+    def test_audit_logs_time_filtering(self, memory_manager):
+        """Test audit log filtering by time range."""
+        session_id = "time-filter-test"
+        
+        # Log entries at different times
+        now = datetime.now()
+        
+        # Log first entry
+        memory_manager.log_audit_entry(
+            session_id=session_id,
+            event_type="early_event",
+            component="test",
+            details={"timestamp": "early"}
+        )
+        
+        # Simulate time passing
+        import time
+        time.sleep(0.1)
+        
+        # Log second entry
+        memory_manager.log_audit_entry(
+            session_id=session_id,
+            event_type="late_event", 
+            component="test",
+            details={"timestamp": "late"}
+        )
+        
+        # Get all logs
+        all_logs = memory_manager.get_audit_logs(session_id=session_id)
+        assert len(all_logs) == 2
+        
+        # Filter by start time (should get only the later entry)
+        start_time = now + timedelta(seconds=0.05)
+        filtered_logs = memory_manager.get_audit_logs(
+            session_id=session_id,
+            start_time=start_time
+        )
+        assert len(filtered_logs) == 1
+        assert filtered_logs[0].event_type == "late_event"
+        
+        # Filter by end time (should get only the earlier entry)
+        end_time = now + timedelta(seconds=0.05)
+        filtered_logs = memory_manager.get_audit_logs(
+            session_id=session_id,
+            end_time=end_time
+        )
+        assert len(filtered_logs) == 1
+        assert filtered_logs[0].event_type == "early_event"
+    
+    def test_session_update_workflow(self, memory_manager, sample_session):
+        """Test updating existing sessions."""
+        # Store initial session
+        assert memory_manager.store_session(sample_session)
+        
+        # Modify session
+        sample_session.status = OptimizationStatus.RUNNING
+        sample_session.criteria_name = "Updated criteria"
+        
+        # Store updated session (should replace)
+        assert memory_manager.store_session(sample_session)
+        
+        # Retrieve and verify updates
+        retrieved = memory_manager.retrieve_session(sample_session.id)
+        assert retrieved is not None
+        assert retrieved.status == OptimizationStatus.RUNNING
+        assert retrieved.criteria_name == "Updated criteria"
+    
+    def test_session_recovery_edge_cases(self, memory_manager):
+        """Test session recovery edge cases."""
+        # Test recovery of session with no completed steps
+        session = OptimizationSession(
+            id="no-completed-steps",
+            model_id="test-model",
+            status=OptimizationStatus.FAILED
+        )
+        
+        # Add only failed steps
+        failed_step = OptimizationStep(
+            step_id="failed-step",
+            technique="test",
+            status="failed",
+            error_message="Test failure"
+        )
+        session.steps = [failed_step]
+        
+        memory_manager.store_session(session)
+        
+        # Recovery info should indicate no recoverable steps
+        recovery_info = memory_manager.get_session_recovery_info(session.id)
+        assert recovery_info is not None
+        assert len(recovery_info.recoverable_steps) == 0
+        
+        # Recovery should still work (reset to pending)
+        recovered = memory_manager.recover_session(session.id)
+        assert recovered is not None
+        assert recovered.status == OptimizationStatus.PENDING
+    
+    def test_datetime_serialization_edge_cases(self, memory_manager):
+        """Test datetime serialization with various formats."""
+        # Create session with various datetime formats
+        now = datetime.now()
+        session = OptimizationSession(
+            id="datetime-test",
+            model_id="test-model",
+            status=OptimizationStatus.PENDING,
+            created_at=now
+        )
+        
+        # Add step with basic fields (OptimizationStep doesn't have start_time/end_time)
+        step = OptimizationStep(
+            step_id="datetime-step",
+            technique="test",
+            status="completed"
+        )
+        session.steps = [step]
+        
+        # Store and retrieve
+        assert memory_manager.store_session(session)
+        retrieved = memory_manager.retrieve_session(session.id)
+        
+        assert retrieved is not None
+        assert retrieved.created_at == now
+        assert len(retrieved.steps) == 1
+        assert retrieved.steps[0].step_id == "datetime-step"
+    
+    def test_database_schema_validation(self, memory_manager, temp_db_path):
+        """Test database schema is correctly created."""
+        # Check that all required tables and indexes exist
+        with memory_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Check tables
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name IN ('optimization_sessions', 'audit_logs')
+            """)
+            tables = [row[0] for row in cursor.fetchall()]
+            assert 'optimization_sessions' in tables
+            assert 'audit_logs' in tables
+            
+            # Check indexes
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='index' AND name LIKE 'idx_%'
+            """)
+            indexes = [row[0] for row in cursor.fetchall()]
+            expected_indexes = [
+                'idx_sessions_status',
+                'idx_sessions_model_id', 
+                'idx_sessions_created_at',
+                'idx_audit_session_id',
+                'idx_audit_timestamp',
+                'idx_audit_event_type'
+            ]
+            
+            for expected_idx in expected_indexes:
+                assert expected_idx in indexes, f"Missing index: {expected_idx}"
+    
+    def test_session_list_pagination(self, memory_manager):
+        """Test session listing with pagination."""
+        # Create multiple sessions
+        sessions = []
+        for i in range(15):
+            session = OptimizationSession(
+                id=f"pagination-session-{i:02d}",
+                model_id=f"model-{i}",
+                status=OptimizationStatus.COMPLETED if i % 2 == 0 else OptimizationStatus.FAILED
+            )
+            sessions.append(session)
+            memory_manager.store_session(session)
+        
+        # Test pagination
+        page1 = memory_manager.list_sessions(limit=5, offset=0)
+        assert len(page1) == 5
+        
+        page2 = memory_manager.list_sessions(limit=5, offset=5)
+        assert len(page2) == 5
+        
+        page3 = memory_manager.list_sessions(limit=5, offset=10)
+        assert len(page3) == 5
+        
+        # Verify no overlap
+        page1_ids = {s['id'] for s in page1}
+        page2_ids = {s['id'] for s in page2}
+        page3_ids = {s['id'] for s in page3}
+        
+        assert len(page1_ids & page2_ids) == 0
+        assert len(page2_ids & page3_ids) == 0
+        assert len(page1_ids & page3_ids) == 0
+    
+    def test_audit_log_metadata_handling(self, memory_manager):
+        """Test audit log metadata functionality."""
+        session_id = "metadata-test"
+        
+        # Log entry with metadata
+        assert memory_manager.log_audit_entry(
+            session_id=session_id,
+            event_type="test_with_metadata",
+            component="test_component",
+            details={"key": "value"},
+            user_id="test_user"
+        )
+        
+        # Retrieve and verify metadata
+        logs = memory_manager.get_audit_logs(session_id=session_id)
+        assert len(logs) == 1
+        
+        log_entry = logs[0]
+        assert log_entry.session_id == session_id
+        assert log_entry.event_type == "test_with_metadata"
+        assert log_entry.component == "test_component"
+        assert log_entry.details["key"] == "value"
+        assert log_entry.user_id == "test_user"
+        assert isinstance(log_entry.metadata, dict)
+    
+    def test_cache_size_limit(self, memory_manager_config, temp_db_path):
+        """Test cache size limit enforcement."""
+        # Set small cache size
+        memory_manager_config["cache_max_size"] = 3
+        manager = MemoryManager(memory_manager_config)
+        manager.initialize()
+        
+        try:
+            # Store more sessions than cache can hold
+            sessions = []
+            for i in range(5):
+                session = OptimizationSession(
+                    id=f"cache-limit-{i}",
+                    model_id=f"model-{i}",
+                    status=OptimizationStatus.PENDING
+                )
+                sessions.append(session)
+                manager.store_session(session)
+            
+            # Cache should only hold the last 3 sessions
+            assert len(manager._session_cache) <= 3
+            
+            # Verify most recent sessions are in cache
+            for i in range(2, 5):  # Last 3 sessions
+                assert f"cache-limit-{i}" in manager._session_cache
+            
+        finally:
+            manager.cleanup()
+    
+    def test_backup_restore_error_handling(self, memory_manager, temp_db_path):
+        """Test backup and restore error handling."""
+        # Test restore with non-existent backup
+        non_existent_backup = temp_db_path.parent / "non_existent_backup.db"
+        assert not memory_manager.restore_database(non_existent_backup)
+        
+        # Test backup to invalid path (should handle gracefully)
+        invalid_backup_path = Path("/invalid/path/backup.db")
+        assert not memory_manager.backup_database(invalid_backup_path)
+    
+    def test_session_statistics_edge_cases(self, memory_manager):
+        """Test session statistics with edge cases."""
+        # Get stats with empty database
+        stats = memory_manager.get_session_statistics()
+        assert stats["total_sessions"] == 0
+        assert stats["total_storage_size_mb"] == 0
+        assert stats["recent_sessions_7_days"] == 0
+        assert stats["average_duration_seconds"] is None
+        
+        # Add session with no duration (not started/completed)
+        session = OptimizationSession(
+            id="no-duration-session",
+            model_id="test-model",
+            status=OptimizationStatus.PENDING
+        )
+        memory_manager.store_session(session)
+        
+        # Stats should handle sessions without duration
+        stats = memory_manager.get_session_statistics()
+        assert stats["total_sessions"] == 1
+        assert stats["average_duration_seconds"] is None  # No completed sessions with duration
 
 
 if __name__ == "__main__":

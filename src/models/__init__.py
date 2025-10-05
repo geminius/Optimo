@@ -2,6 +2,8 @@
 
 # Expose commonly used classes for convenience
 from .core import (
+    ModelType,
+    ModelFramework,
     ModelMetadata,
     OptimizationSession,
     SessionSnapshot,
@@ -19,15 +21,30 @@ from .core import (
     PerformanceProfile,
     OptimizationOpportunity,
     Recommendation,
+    OptimizationStep,
     BenchmarkResult,
     PerformanceMetrics,
     ComparisonResult,
     ValidationStatus,
 )
 
-from .store import ModelStore
+from .validation import (
+    ValidationError,
+    ModelFormatValidator,
+    OptimizationParameterValidator,
+    validate_model_metadata,
+    validate_optimization_session,
+    validate_analysis_report,
+    validate_evaluation_report,
+    calculate_file_checksum,
+    validate_file_integrity,
+)
+
+from .store import ModelStore, ModelStoreError, ModelVersionManager
 
 __all__ = [
+    "ModelType",
+    "ModelFramework",
     "ModelMetadata",
     "OptimizationSession",
     "SessionSnapshot",
@@ -45,10 +62,22 @@ __all__ = [
     "PerformanceProfile",
     "OptimizationOpportunity",
     "Recommendation",
+    "OptimizationStep",
     "BenchmarkResult",
     "PerformanceMetrics",
     "ComparisonResult",
     "ValidationStatus",
     "ModelStore",
+    "ModelStoreError",
+    "ModelVersionManager",
+    "ValidationError",
+    "ModelFormatValidator",
+    "OptimizationParameterValidator",
+    "validate_model_metadata",
+    "validate_optimization_session",
+    "validate_analysis_report",
+    "validate_evaluation_report",
+    "calculate_file_checksum",
+    "validate_file_integrity",
 ]
 

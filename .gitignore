@@ -142,9 +142,12 @@ frontend/dist/
 logs/
 *.log
 test_logs/
+api.log
 
 # Test results
 test_results/
+!test_results/integration_test_report.json
+!test_results/integration_test_summary.txt
 
 # IDE
 .vscode/
@@ -172,6 +175,8 @@ Thumbs.db
 *.safetensors
 models/
 uploads/
+test_models/
+test_storage/
 
 # Configuration files with secrets
 .env.local
