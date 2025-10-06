@@ -32,7 +32,6 @@ class TestSuite(Enum):
     INTEGRATION = "integration"
     PERFORMANCE = "performance"
     STRESS = "stress"
-    END_TO_END = "end_to_end"
     ALL = "all"
 
 

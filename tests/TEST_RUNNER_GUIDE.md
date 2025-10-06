@@ -56,34 +56,6 @@ Results are saved in `test_results/` directory with:
 - **HTML format**: Browser-viewable report
 - **TXT format**: Human-readable summary
 
-## What Was Fixed
-
-### 1. Test Path Pattern
-**Before**: `"tests/test_*.py"` (literal string, not expanded)
-**After**: `"tests/"` with `--ignore` flags for subdirectories
-
-### 2. Output Handling
-**Before**: `capture_output=True` (caused blocking on large output)
-**After**: Output streams directly to terminal
-
-### 3. Timeout
-**Before**: 600 seconds (10 minutes)
-**After**: 1800 seconds (30 minutes) for large test suites
-
-### 4. Progress Indicators
-Added messages to show:
-- When tests start
-- Estimated duration warnings
-- Completion messages with timing
-
-### 5. Interrupt Handling
-**Before**: Ctrl+C didn't work, process couldn't be stopped
-**After**: 
-- Ctrl+C properly terminates tests
-- Graceful cleanup of subprocess
-- Partial results saved if interrupted
-- Exit code 130 (standard for SIGINT)
-
 ## Test Suite Overview
 
 ### Unit Tests (689 tests)
