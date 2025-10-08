@@ -2,9 +2,10 @@
 
 ## Summary
 - **Total Tests**: 689
-- **Initial Failures**: 28 failures + 3 errors = 31 issues
-- **Fixed**: 22
-- **Remaining**: 9
+- **Initial Failures**: 28 failures + 3 errors = 31 issues  
+- **Fixed**: 22 (after first round)
+- **Current Status**: 17 failures remaining (97.1% pass rate)
+- **In Progress**: API test fixes
 
 ## Fixed Issues ✅
 
@@ -86,3 +87,29 @@ They don't block core functionality and can be addressed in follow-up work.
 2. Fix test_comprehensive_suite.py issues (2 tests)
 3. Fix specific test issues (2 tests)
 4. Investigate agent integration test failures (7 tests)
+
+
+## Second Round Fixes (In Progress)
+
+### API Test Issues
+**Status**: Investigating 500 errors and auth test failures
+
+Current API failures (7 tests):
+- test_upload_model_success - 500 error (needs proper User object and app state)
+- test_upload_model_unauthorized - 500 error  
+- test_start_optimization - 500 error
+- test_unauthorized_access - Auth bypass too broad (returns 200 instead of 403)
+- test_invalid_token - Auth bypass too broad (returns 200 instead of 401)
+- test_optimization_request_validation - 503 instead of 422
+- test_distilbert_e2e - 500 error
+
+**Changes Made**:
+1. Updated client fixture to set up app.state with mock services
+2. Modified auth_token fixture to properly override get_current_user
+3. Added User object creation for authenticated requests
+4. Ensured upload directory exists
+
+**Next Steps**:
+- Verify mock_optimization_manager is properly injected
+- Fix auth tests to properly test unauthorized access
+- Debug 500 errors in upload and optimization endpoints

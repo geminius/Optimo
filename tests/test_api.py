@@ -19,32 +19,48 @@ from src.services.optimization_manager import OptimizationManager
 
 
 @pytest.fixture
-def client():
-    """Create test client with disabled authentication for testing."""
-    # Disable authentication dependency for tests
-    from src.api.dependencies import get_current_user
+def client(mock_optimization_manager):
+    """Create test client for API testing."""
+    # Ensure upload directory exists
+    from pathlib import Path
+    upload_dir = Path("uploads")
+    upload_dir.mkdir(exist_ok=True)
     
-    def override_get_current_user():
-        return {"user_id": "test_user", "username": "test"}
+    # Set up app state with mock services
+    app.state.optimization_manager = mock_optimization_manager
+    app.state.platform_integrator = Mock()
     
-    app.dependency_overrides[get_current_user] = override_get_current_user
-    
+    # Create client
     client = TestClient(app)
     yield client
     
     # Clean up
     app.dependency_overrides.clear()
+    if hasattr(app.state, 'optimization_manager'):
+        delattr(app.state, 'optimization_manager')
+    if hasattr(app.state, 'platform_integrator'):
+        delattr(app.state, 'platform_integrator')
 
 
 @pytest.fixture
-def auth_token():
-    """Get authentication token for tests (mocked)."""
+def auth_token(client):
+    """Get authentication token for tests."""
+    # Mock the authentication for tests by overriding the dependency
+    from src.api.dependencies import get_current_user
+    from src.api.models import User
+    
+    def override_get_current_user():
+        return User(user_id="test_user", username="test", email="test@example.com")
+    
+    app.dependency_overrides[get_current_user] = override_get_current_user
+    
+    # Return a fake token (the override makes it work)
     return "test_token_12345"
 
 
 @pytest.fixture
 def auth_headers(auth_token):
-    """Get authorization headers (not actually used due to dependency override)."""
+    """Get authorization headers for authenticated requests."""
     return {"Authorization": f"Bearer {auth_token}"}
 
 
