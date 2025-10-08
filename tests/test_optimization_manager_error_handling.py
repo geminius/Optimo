@@ -59,11 +59,18 @@ class TestOptimizationManagerErrorHandling:
     @pytest.fixture
     def optimization_criteria(self):
         """Create optimization criteria for testing."""
+        from src.config.optimization_criteria import OptimizationConstraints, OptimizationTechnique
+        
+        constraints = OptimizationConstraints(
+            preserve_accuracy_threshold=0.95,
+            allowed_techniques=[OptimizationTechnique.QUANTIZATION, OptimizationTechnique.PRUNING]
+        )
+        
         return OptimizationCriteria(
-            target_latency_ms=100,
-            target_memory_mb=500,
-            min_accuracy=0.95,
-            optimization_techniques=["quantization", "pruning"]
+            name="test_error_handling",
+            description="Error handling test criteria",
+            constraints=constraints,
+            target_deployment="general"
         )
     
     def test_model_loading_error_handling(self, optimization_manager):

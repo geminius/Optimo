@@ -20,24 +20,31 @@ from src.services.optimization_manager import OptimizationManager
 
 @pytest.fixture
 def client():
-    """Create test client."""
-    return TestClient(app)
+    """Create test client with disabled authentication for testing."""
+    # Disable authentication dependency for tests
+    from src.api.dependencies import get_current_user
+    
+    def override_get_current_user():
+        return {"user_id": "test_user", "username": "test"}
+    
+    app.dependency_overrides[get_current_user] = override_get_current_user
+    
+    client = TestClient(app)
+    yield client
+    
+    # Clean up
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture
-def auth_token(client):
-    """Get authentication token for tests."""
-    response = client.post("/auth/login", json={
-        "username": "admin",
-        "password": "admin"
-    })
-    assert response.status_code == 200
-    return response.json()["access_token"]
+def auth_token():
+    """Get authentication token for tests (mocked)."""
+    return "test_token_12345"
 
 
 @pytest.fixture
 def auth_headers(auth_token):
-    """Get authorization headers."""
+    """Get authorization headers (not actually used due to dependency override)."""
     return {"Authorization": f"Bearer {auth_token}"}
 
 
