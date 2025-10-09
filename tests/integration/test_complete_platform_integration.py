@@ -114,6 +114,14 @@ async def platform_integrator(platform_config):
         mock.return_value.cleanup.return_value = None
         return mock
     
+    # Create special mock for OptimizationManager that returns list from get_active_sessions
+    def create_optimization_manager_mock():
+        mock = MagicMock()
+        mock.return_value.initialize.return_value = True
+        mock.return_value.cleanup.return_value = None
+        mock.return_value.get_active_sessions.return_value = []  # Return empty list
+        return mock
+    
     # Mock the actual agent initialization to avoid dependencies
     with patch.multiple(
         'src.integration.platform_integration',
@@ -129,7 +137,7 @@ async def platform_integrator(platform_config):
         DistillationAgent=create_mock_with_initialize(),
         CompressionAgent=create_mock_with_initialize(),
         ArchitectureSearchAgent=create_mock_with_initialize(),
-        OptimizationManager=create_mock_with_initialize()
+        OptimizationManager=create_optimization_manager_mock()
     ):
         success = await integrator.initialize_platform()
         assert success, "Platform initialization should succeed"
@@ -147,6 +155,11 @@ class TestCompletePlatformIntegration:
         """Test complete platform initialization and shutdown cycle."""
         integrator = PlatformIntegrator(platform_config)
         
+        # Create mock OptimizationManager that returns proper types
+        mock_opt_manager = MagicMock()
+        mock_opt_manager.return_value.get_active_sessions.return_value = []
+        mock_opt_manager.return_value.initialize.return_value = True
+        
         # Mock dependencies
         with patch.multiple(
             'src.integration.platform_integration',
@@ -162,7 +175,7 @@ class TestCompletePlatformIntegration:
             DistillationAgent=MagicMock,
             CompressionAgent=MagicMock,
             ArchitectureSearchAgent=MagicMock,
-            OptimizationManager=MagicMock
+            OptimizationManager=mock_opt_manager
         ):
             # Test initialization
             assert not integrator.is_initialized
@@ -449,6 +462,11 @@ class TestCompletePlatformIntegration:
         """Test proper resource cleanup during shutdown."""
         integrator = PlatformIntegrator(platform_config)
         
+        # Create mock OptimizationManager that returns proper types
+        mock_opt_manager = MagicMock()
+        mock_opt_manager.return_value.get_active_sessions.return_value = []
+        mock_opt_manager.return_value.initialize.return_value = True
+        
         with patch.multiple(
             'src.integration.platform_integration',
             ModelStore=MagicMock,
@@ -463,7 +481,7 @@ class TestCompletePlatformIntegration:
             DistillationAgent=MagicMock,
             CompressionAgent=MagicMock,
             ArchitectureSearchAgent=MagicMock,
-            OptimizationManager=MagicMock
+            OptimizationManager=mock_opt_manager
         ):
             # Initialize platform
             await integrator.initialize_platform()
