@@ -420,9 +420,12 @@ class PlatformIntegrator:
                 pass
             
             # Test optimization manager
-            active_sessions = self.optimization_manager.get_active_sessions()
-            if not isinstance(active_sessions, list):
-                raise RuntimeError("get_active_sessions() should return a list")
+            try:
+                active_sessions = self.optimization_manager.get_active_sessions()
+                if not isinstance(active_sessions, list):
+                    raise RuntimeError(f"get_active_sessions() should return a list, got {type(active_sessions)}: {active_sessions}")
+            except Exception as e:
+                raise RuntimeError(f"get_active_sessions() failed: {type(e).__name__}: {e}")
             
             self.logger.info("Integration validation completed successfully")
             
