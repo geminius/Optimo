@@ -155,27 +155,37 @@ class TestCompletePlatformIntegration:
         """Test complete platform initialization and shutdown cycle."""
         integrator = PlatformIntegrator(platform_config)
         
-        # Create mock OptimizationManager that returns proper types
-        mock_opt_manager = MagicMock()
-        mock_opt_manager.return_value.get_active_sessions.return_value = []
-        mock_opt_manager.return_value.initialize.return_value = True
+        # Create properly configured mocks
+        def create_service_mock():
+            mock = MagicMock()
+            mock.return_value.initialize.return_value = True
+            mock.return_value.cleanup.return_value = None
+            return mock
+        
+        # Create mock OptimizationManager with proper return values
+        mock_opt_manager_class = MagicMock()
+        mock_opt_manager_instance = MagicMock()
+        mock_opt_manager_instance.initialize.return_value = True
+        mock_opt_manager_instance.cleanup.return_value = None
+        mock_opt_manager_instance.get_active_sessions.return_value = []
+        mock_opt_manager_class.return_value = mock_opt_manager_instance
         
         # Mock dependencies
         with patch.multiple(
             'src.integration.platform_integration',
-            ModelStore=MagicMock,
-            MemoryManager=MagicMock,
+            ModelStore=create_service_mock(),
+            MemoryManager=create_service_mock(),
             NotificationService=MagicMock,
-            MonitoringService=MagicMock,
-            AnalysisAgent=MagicMock,
-            PlanningAgent=MagicMock,
-            EvaluationAgent=MagicMock,
-            QuantizationAgent=MagicMock,
-            PruningAgent=MagicMock,
-            DistillationAgent=MagicMock,
-            CompressionAgent=MagicMock,
-            ArchitectureSearchAgent=MagicMock,
-            OptimizationManager=mock_opt_manager
+            MonitoringService=create_service_mock(),
+            AnalysisAgent=create_service_mock(),
+            PlanningAgent=create_service_mock(),
+            EvaluationAgent=create_service_mock(),
+            QuantizationAgent=create_service_mock(),
+            PruningAgent=create_service_mock(),
+            DistillationAgent=create_service_mock(),
+            CompressionAgent=create_service_mock(),
+            ArchitectureSearchAgent=create_service_mock(),
+            OptimizationManager=mock_opt_manager_class
         ):
             # Test initialization
             assert not integrator.is_initialized
@@ -462,26 +472,36 @@ class TestCompletePlatformIntegration:
         """Test proper resource cleanup during shutdown."""
         integrator = PlatformIntegrator(platform_config)
         
-        # Create mock OptimizationManager that returns proper types
-        mock_opt_manager = MagicMock()
-        mock_opt_manager.return_value.get_active_sessions.return_value = []
-        mock_opt_manager.return_value.initialize.return_value = True
+        # Create properly configured mocks
+        def create_service_mock():
+            mock = MagicMock()
+            mock.return_value.initialize.return_value = True
+            mock.return_value.cleanup.return_value = None
+            return mock
+        
+        # Create mock OptimizationManager with proper return values
+        mock_opt_manager_class = MagicMock()
+        mock_opt_manager_instance = MagicMock()
+        mock_opt_manager_instance.initialize.return_value = True
+        mock_opt_manager_instance.cleanup.return_value = None
+        mock_opt_manager_instance.get_active_sessions.return_value = []
+        mock_opt_manager_class.return_value = mock_opt_manager_instance
         
         with patch.multiple(
             'src.integration.platform_integration',
-            ModelStore=MagicMock,
-            MemoryManager=MagicMock,
+            ModelStore=create_service_mock(),
+            MemoryManager=create_service_mock(),
             NotificationService=MagicMock,
-            MonitoringService=MagicMock,
-            AnalysisAgent=MagicMock,
-            PlanningAgent=MagicMock,
-            EvaluationAgent=MagicMock,
-            QuantizationAgent=MagicMock,
-            PruningAgent=MagicMock,
-            DistillationAgent=MagicMock,
-            CompressionAgent=MagicMock,
-            ArchitectureSearchAgent=MagicMock,
-            OptimizationManager=mock_opt_manager
+            MonitoringService=create_service_mock(),
+            AnalysisAgent=create_service_mock(),
+            PlanningAgent=create_service_mock(),
+            EvaluationAgent=create_service_mock(),
+            QuantizationAgent=create_service_mock(),
+            PruningAgent=create_service_mock(),
+            DistillationAgent=create_service_mock(),
+            CompressionAgent=create_service_mock(),
+            ArchitectureSearchAgent=create_service_mock(),
+            OptimizationManager=mock_opt_manager_class
         ):
             # Initialize platform
             await integrator.initialize_platform()

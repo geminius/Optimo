@@ -9,18 +9,20 @@ import requests
 import time
 import subprocess
 import json
-import psycopg2
-import redis
-import websocket
 import tempfile
 import torch
 import torch.nn as nn
-import onnx
-import tensorflow as tf
 from typing import Dict, Any
 import os
 import io
 from pathlib import Path
+
+# Skip if optional dependencies are missing
+psycopg2 = pytest.importorskip("psycopg2")
+redis = pytest.importorskip("redis")
+websocket = pytest.importorskip("websocket")
+onnx = pytest.importorskip("onnx")
+tf = pytest.importorskip("tensorflow")
 
 
 class TestDeploymentValidation:
