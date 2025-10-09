@@ -13,8 +13,10 @@ import torch.nn as nn
 import json
 import os
 from typing import Dict, Any
-import websocket
 import threading
+
+# Skip if optional dependencies are missing
+websocket = pytest.importorskip("websocket")
 
 
 class TestEndToEndDeployment:

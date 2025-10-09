@@ -8,6 +8,7 @@ import sys
 import time
 import json
 import argparse
+import signal
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
@@ -105,7 +106,7 @@ class TestRunner:
     def run_pytest_suite(self, test_path: str, suite_name: str, 
                         extra_args: List[str] = None) -> TestSuiteResult:
         """Run pytest suite and parse results."""
-        print(f"Running {suite_name} tests...")
+        print(f"\nRunning {suite_name} tests...")
         
         # Prepare pytest command
         cmd = [
@@ -113,25 +114,46 @@ class TestRunner:
             test_path,
             "--json-report",
             f"--json-report-file={self.output_dir}/{suite_name}_results.json",
-            "-v"
+            "--tb=line"  # Minimal tracebacks
         ]
         
         if extra_args:
             cmd.extend(extra_args)
         
+        print(f"This may take several minutes for large test suites...")
+        print("=" * 80)
+        
         start_time = time.perf_counter()
+        process = None
         
         try:
-            # Run pytest
-            result = subprocess.run(
+            # Run pytest with Popen for better control
+            process = subprocess.Popen(
                 cmd,
-                capture_output=True,
-                text=True,
-                timeout=3600  # 1 hour timeout
+                stdout=sys.stdout,
+                stderr=sys.stderr
             )
+            
+            # Wait for completion with timeout
+            try:
+                process.wait(timeout=1800)  # 30 minute timeout
+            except subprocess.TimeoutExpired:
+                print(f"\n⚠️  {suite_name} tests timed out after 30 minutes")
+                process.kill()
+                process.wait()
+                raise
             
             end_time = time.perf_counter()
             duration = end_time - start_time
+            
+            print(f"\n✓ {suite_name} tests completed in {duration:.1f} seconds")
+            
+            # Create a result object for parsing
+            class Result:
+                def __init__(self, returncode):
+                    self.returncode = returncode
+            
+            result = Result(process.returncode)
             
             # Parse JSON report
             json_report_path = self.output_dir / f"{suite_name}_results.json"
@@ -156,12 +178,13 @@ class TestRunner:
                             suite=suite_name,
                             status="failed",
                             duration_seconds=duration,
-                            error_message=result.stderr or "Unknown error"
+                            error_message=f"JSON report not generated. Exit code: {result.returncode}"
                         )
                     ]
                 )
         
         except subprocess.TimeoutExpired:
+            print(f"\n⚠️  {suite_name} tests timed out after 30 minutes")
             return TestSuiteResult(
                 suite_name=suite_name,
                 total_tests=0,
@@ -169,14 +192,48 @@ class TestRunner:
                 failed_tests=1,
                 skipped_tests=0,
                 error_tests=0,
-                total_duration_seconds=3600,
+                total_duration_seconds=1800,
                 test_results=[
                     TestResult(
                         test_name=f"{suite_name}_timeout",
                         suite=suite_name,
                         status="error",
-                        duration_seconds=3600,
-                        error_message="Test suite timed out after 1 hour"
+                        duration_seconds=1800,
+                        error_message="Test suite timed out after 30 minutes"
+                    )
+                ]
+            )
+        
+        except KeyboardInterrupt:
+            print(f"\n\n⚠️  Test execution interrupted by user (Ctrl+C)")
+            if process and process.poll() is None:
+                print(f"Terminating {suite_name} tests...")
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    print(f"Force killing {suite_name} tests...")
+                    process.kill()
+                    process.wait()
+            
+            end_time = time.perf_counter()
+            duration = end_time - start_time
+            
+            return TestSuiteResult(
+                suite_name=suite_name,
+                total_tests=0,
+                passed_tests=0,
+                failed_tests=0,
+                skipped_tests=0,
+                error_tests=1,
+                total_duration_seconds=duration,
+                test_results=[
+                    TestResult(
+                        test_name=f"{suite_name}_interrupted",
+                        suite=suite_name,
+                        status="error",
+                        duration_seconds=duration,
+                        error_message="Test execution interrupted by user"
                     )
                 ]
             )
@@ -441,7 +498,19 @@ class TestRunner:
         
         for test_suite in suites_to_run:
             if test_suite == TestSuite.UNIT:
-                result = self.run_pytest_suite("tests/test_*.py", "unit")
+                # Pass tests directory and exclude subdirectories
+                result = self.run_pytest_suite(
+                    "tests/", 
+                    "unit",
+                    extra_args=[
+                        "--ignore=tests/integration",
+                        "--ignore=tests/performance", 
+                        "--ignore=tests/stress",
+                        "--ignore=tests/deployment",
+                        "--ignore=tests/automation",
+                        "--ignore=tests/data"
+                    ]
+                )
                 results.append(result)
             
             elif test_suite == TestSuite.INTEGRATION:
@@ -678,32 +747,53 @@ def main():
     
     args = parser.parse_args()
     
-    # Create test runner
-    runner = TestRunner(args.output_dir)
+    try:
+        # Create test runner
+        runner = TestRunner(args.output_dir)
+        
+        print(f"Starting automated test execution: {runner.execution_id}")
+        print(f"Output directory: {args.output_dir}")
+        print(f"Press Ctrl+C to cancel at any time\n")
+        
+        # Run tests
+        suite = TestSuite(args.suite)
+        results = runner.run_test_suite(suite, args.parallel)
+        
+        # Generate and save report
+        report = runner.generate_report()
+        saved_files = runner.save_report(report, args.formats)
+        
+        print(f"\nTest execution completed!")
+        print(f"Total tests: {report.summary['total_tests']}")
+        print(f"Success rate: {report.summary['success_rate']:.1f}%")
+        print(f"Reports saved to:")
+        for file_path in saved_files:
+            print(f"  - {file_path}")
+        
+        # Exit with appropriate code
+        if report.summary['failed_tests'] > 0 or report.summary['error_tests'] > 0:
+            sys.exit(1)
+        else:
+            sys.exit(0)
     
-    print(f"Starting automated test execution: {runner.execution_id}")
-    print(f"Output directory: {args.output_dir}")
-    
-    # Run tests
-    suite = TestSuite(args.suite)
-    results = runner.run_test_suite(suite, args.parallel)
-    
-    # Generate and save report
-    report = runner.generate_report()
-    saved_files = runner.save_report(report, args.formats)
-    
-    print(f"\nTest execution completed!")
-    print(f"Total tests: {report.summary['total_tests']}")
-    print(f"Success rate: {report.summary['success_rate']:.1f}%")
-    print(f"Reports saved to:")
-    for file_path in saved_files:
-        print(f"  - {file_path}")
-    
-    # Exit with appropriate code
-    if report.summary['failed_tests'] > 0 or report.summary['error_tests'] > 0:
-        sys.exit(1)
-    else:
-        sys.exit(0)
+    except KeyboardInterrupt:
+        print(f"\n\n{'='*80}")
+        print(f"Test execution cancelled by user")
+        print(f"{'='*80}")
+        
+        # Try to generate partial report if any results exist
+        if 'runner' in locals() and runner.results:
+            print(f"\nGenerating partial report from completed tests...")
+            try:
+                report = runner.generate_report()
+                saved_files = runner.save_report(report, args.formats)
+                print(f"Partial results saved to:")
+                for file_path in saved_files:
+                    print(f"  - {file_path}")
+            except Exception as e:
+                print(f"Could not generate partial report: {e}")
+        
+        sys.exit(130)  # Standard exit code for SIGINT
 
 
 if __name__ == "__main__":

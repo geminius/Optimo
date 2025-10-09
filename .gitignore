@@ -226,3 +226,7 @@ frontend/E2E_TEST_SUMMARY.md
 
 # Redundant frontend tests (overlapping with E2E tests)
 frontend/src/tests/integration/App.integration.test.tsx
+
+# Quick E2E test files (development/testing artifacts)
+quick_e2e_test.py
+E2E_TEST_RESULTS.md

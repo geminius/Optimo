@@ -136,26 +136,38 @@ class OptimizationManager:
         try:
             self.logger.info("Initializing OptimizationManager and agents")
             
-            # Initialize analysis agent
-            analysis_config = self.config.get("analysis_agent", {})
-            self.analysis_agent = AnalysisAgent(analysis_config)
-            if not self.analysis_agent.initialize():
-                raise RuntimeError("Failed to initialize AnalysisAgent")
+            # Initialize analysis agent (if not already injected)
+            if self.analysis_agent is None:
+                analysis_config = self.config.get("analysis_agent", {})
+                self.analysis_agent = AnalysisAgent(analysis_config)
+                if not self.analysis_agent.initialize():
+                    raise RuntimeError("Failed to initialize AnalysisAgent")
+            else:
+                self.logger.info("AnalysisAgent already injected, skipping initialization")
             
-            # Initialize planning agent
-            planning_config = self.config.get("planning_agent", {})
-            self.planning_agent = PlanningAgent(planning_config)
-            if not self.planning_agent.initialize():
-                raise RuntimeError("Failed to initialize PlanningAgent")
+            # Initialize planning agent (if not already injected)
+            if self.planning_agent is None:
+                planning_config = self.config.get("planning_agent", {})
+                self.planning_agent = PlanningAgent(planning_config)
+                if not self.planning_agent.initialize():
+                    raise RuntimeError("Failed to initialize PlanningAgent")
+            else:
+                self.logger.info("PlanningAgent already injected, skipping initialization")
             
-            # Initialize evaluation agent
-            evaluation_config = self.config.get("evaluation_agent", {})
-            self.evaluation_agent = EvaluationAgent(evaluation_config)
-            if not self.evaluation_agent.initialize():
-                raise RuntimeError("Failed to initialize EvaluationAgent")
+            # Initialize evaluation agent (if not already injected)
+            if self.evaluation_agent is None:
+                evaluation_config = self.config.get("evaluation_agent", {})
+                self.evaluation_agent = EvaluationAgent(evaluation_config)
+                if not self.evaluation_agent.initialize():
+                    raise RuntimeError("Failed to initialize EvaluationAgent")
+            else:
+                self.logger.info("EvaluationAgent already injected, skipping initialization")
             
-            # Initialize optimization agents
-            self._initialize_optimization_agents()
+            # Initialize optimization agents (if not already injected)
+            if not self.optimization_agents:
+                self._initialize_optimization_agents()
+            else:
+                self.logger.info(f"Optimization agents already injected ({len(self.optimization_agents)} agents), skipping initialization")
             
             self.logger.info("OptimizationManager initialization completed successfully")
             return True

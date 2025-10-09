@@ -135,22 +135,30 @@ class TestCompleteOptimizationWorkflow:
         assert any(m["id"] == model_id for m in models)
         
         # Step 3: Start optimization
+        from src.api.dependencies import get_optimization_manager
+        
         mock_manager = MagicMock(spec=OptimizationManager)
-        with patch('src.api.main.app.state.optimization_manager', mock_manager):
-            mock_manager.start_optimization_session.return_value = "test-session-123"
-            mock_manager.get_session_status.return_value = {
-                "status": "running",
-                "progress_percentage": 25.0,
-                "current_step": "Analyzing model",
-                "start_time": datetime.now().isoformat(),
-                "last_update": datetime.now().isoformat(),
-                "error_message": None,
-                "session_data": {
-                    "model_id": model_id,
-                    "steps_completed": 1
-                }
+        mock_manager.start_optimization_session.return_value = "test-session-123"
+        mock_manager.get_session_status.return_value = {
+            "status": "running",
+            "progress_percentage": 25.0,
+            "current_step": "Analyzing model",
+            "start_time": datetime.now().isoformat(),
+            "last_update": datetime.now().isoformat(),
+            "error_message": None,
+            "session_data": {
+                "model_id": model_id,
+                "steps_completed": 1
             }
-            
+        }
+        
+        async def mock_get_opt_manager():
+            return mock_manager
+        
+        # Override the dependency for this test
+        app.dependency_overrides[get_optimization_manager] = mock_get_opt_manager
+        
+        try:
             optimize_request = {
                 "model_id": model_id,
                 "criteria_name": "default",
@@ -211,6 +219,13 @@ class TestCompleteOptimizationWorkflow:
             assert results_data["status"] == "completed"
             assert "performance_improvements" in results_data
             assert "techniques_applied" in results_data
+        finally:
+            # Restore original override
+            async def mock_get_optimization_manager():
+                mock_mgr = MagicMock(spec=OptimizationManager)
+                mock_mgr.get_active_sessions.return_value = []
+                return mock_mgr
+            app.dependency_overrides[get_optimization_manager] = mock_get_optimization_manager
         
         # Cleanup: Delete model
         delete_response = client.delete(
@@ -236,25 +251,32 @@ class TestSessionManagement:
         
         model_id = upload_response.json()["model_id"]
         
+        from src.api.dependencies import get_optimization_manager
+        
         mock_manager = MagicMock(spec=OptimizationManager)
-        with patch('src.api.main.app.state.optimization_manager', mock_manager):
-            session_id = "session-lifecycle-test"
-            mock_manager.start_optimization_session.return_value = session_id
-            mock_manager.get_session_status.return_value = {
-                "status": "running",
-                "progress_percentage": 50.0,
-                "current_step": "Optimizing",
-                "start_time": datetime.now().isoformat(),
-                "last_update": datetime.now().isoformat(),
-                "error_message": None,
-                "session_data": {
-                    "model_id": model_id,
-                    "steps_completed": 2
-                }
+        session_id = "session-lifecycle-test"
+        mock_manager.start_optimization_session.return_value = session_id
+        mock_manager.get_session_status.return_value = {
+            "status": "running",
+            "progress_percentage": 50.0,
+            "current_step": "Optimizing",
+            "start_time": datetime.now().isoformat(),
+            "last_update": datetime.now().isoformat(),
+            "error_message": None,
+            "session_data": {
+                "model_id": model_id,
+                "steps_completed": 2
             }
-            mock_manager.cancel_session.return_value = True
-            mock_manager.rollback_session.return_value = True
-            
+        }
+        mock_manager.cancel_session.return_value = True
+        mock_manager.rollback_session.return_value = True
+        
+        async def mock_get_opt_manager():
+            return mock_manager
+        
+        app.dependency_overrides[get_optimization_manager] = mock_get_opt_manager
+        
+        try:
             # Start session
             optimize_response = client.post(
                 "/optimize",
@@ -286,6 +308,13 @@ class TestSessionManagement:
             )
             assert rollback_response.status_code == 200
             assert "message" in rollback_response.json()
+        finally:
+            # Restore original override
+            async def mock_get_optimization_manager():
+                mock_mgr = MagicMock(spec=OptimizationManager)
+                mock_mgr.get_active_sessions.return_value = []
+                return mock_mgr
+            app.dependency_overrides[get_optimization_manager] = mock_get_optimization_manager
         
         # Cleanup
         client.delete(f"/models/{model_id}", headers=auth_headers)
@@ -390,29 +419,57 @@ class TestErrorHandlingAndRecovery:
     
     def test_session_status_not_found(self, client, auth_headers):
         """Test getting status for non-existent session."""
+        from src.api.dependencies import get_optimization_manager
+        
         mock_manager = MagicMock(spec=OptimizationManager)
         mock_manager.get_session_status.side_effect = ValueError("Session not found")
         
-        with patch('src.api.main.app.state.optimization_manager', mock_manager):
+        async def mock_get_opt_manager():
+            return mock_manager
+        
+        app.dependency_overrides[get_optimization_manager] = mock_get_opt_manager
+        
+        try:
             response = client.get(
                 "/sessions/non-existent-session/status",
                 headers=auth_headers
             )
             
             assert response.status_code == 404
+        finally:
+            # Restore original override
+            async def mock_get_optimization_manager():
+                mock_mgr = MagicMock(spec=OptimizationManager)
+                mock_mgr.get_active_sessions.return_value = []
+                return mock_mgr
+            app.dependency_overrides[get_optimization_manager] = mock_get_optimization_manager
     
     def test_cancel_non_existent_session(self, client, auth_headers):
         """Test cancelling non-existent session."""
+        from src.api.dependencies import get_optimization_manager
+        
         mock_manager = MagicMock(spec=OptimizationManager)
         mock_manager.cancel_session.return_value = False
         
-        with patch('src.api.main.app.state.optimization_manager', mock_manager):
+        async def mock_get_opt_manager():
+            return mock_manager
+        
+        app.dependency_overrides[get_optimization_manager] = mock_get_opt_manager
+        
+        try:
             response = client.post(
                 "/sessions/non-existent/cancel",
                 headers=auth_headers
             )
             
             assert response.status_code == 404
+        finally:
+            # Restore original override
+            async def mock_get_optimization_manager():
+                mock_mgr = MagicMock(spec=OptimizationManager)
+                mock_mgr.get_active_sessions.return_value = []
+                return mock_mgr
+            app.dependency_overrides[get_optimization_manager] = mock_get_optimization_manager
     
     def test_results_for_incomplete_session(self, client, auth_headers):
         """Test getting results for incomplete session."""
@@ -472,21 +529,29 @@ class TestAuthenticationAndAuthorization:
         from fastapi.testclient import TestClient
         from src.api.main import app as test_app
         
-        with TestClient(test_app) as test_client:
-            endpoints = [
-                ("/models", "GET"),
-                ("/models/upload", "POST"),
-                ("/optimize", "POST"),
-                ("/sessions", "GET"),
-            ]
-            
-            for endpoint, method in endpoints:
-                if method == "GET":
-                    response = test_client.get(endpoint)
-                else:
-                    response = test_client.post(endpoint)
+        # Clear dependency overrides temporarily
+        original_overrides = test_app.dependency_overrides.copy()
+        test_app.dependency_overrides.clear()
+        
+        try:
+            with TestClient(test_app) as test_client:
+                endpoints = [
+                    ("/models", "GET"),
+                    ("/models/upload", "POST"),
+                    ("/optimize", "POST"),
+                    ("/sessions", "GET"),
+                ]
                 
-                assert response.status_code in [401, 403]
+                for endpoint, method in endpoints:
+                    if method == "GET":
+                        response = test_client.get(endpoint)
+                    else:
+                        response = test_client.post(endpoint)
+                    
+                    assert response.status_code in [401, 403]
+        finally:
+            # Restore overrides
+            test_app.dependency_overrides = original_overrides
     
     def test_access_with_invalid_token(self):
         """Test accessing endpoints with invalid token."""
@@ -494,11 +559,19 @@ class TestAuthenticationAndAuthorization:
         from fastapi.testclient import TestClient
         from src.api.main import app as test_app
         
-        with TestClient(test_app) as test_client:
-            headers = {"Authorization": "Bearer invalid-token-12345"}
-            
-            response = test_client.get("/models", headers=headers)
-            assert response.status_code == 401
+        # Clear dependency overrides temporarily
+        original_overrides = test_app.dependency_overrides.copy()
+        test_app.dependency_overrides.clear()
+        
+        try:
+            with TestClient(test_app) as test_client:
+                headers = {"Authorization": "Bearer invalid-token-12345"}
+                
+                response = test_client.get("/models", headers=headers)
+                assert response.status_code == 401
+        finally:
+            # Restore overrides
+            test_app.dependency_overrides = original_overrides
     
     def test_login_flow(self, client):
         """Test complete login flow."""
@@ -564,30 +637,37 @@ class TestConcurrentOperations:
         model_id = upload_response.json()["model_id"]
         
         try:
+            from src.api.dependencies import get_optimization_manager
+            
             mock_manager = MagicMock(spec=OptimizationManager)
-            with patch('src.api.main.app.state.optimization_manager', mock_manager):
-                session_ids = []
-                
-                # Mock different session IDs for each request
-                def create_session(*args, **kwargs):
-                    session_id = f"session-{len(session_ids)}"
-                    session_ids.append(session_id)
-                    return session_id
-                
-                mock_manager.start_optimization_session.side_effect = create_session
-                mock_manager.get_session_status.return_value = {
-                    "status": "running",
-                    "progress_percentage": 0.0,
-                    "current_step": "Starting",
-                    "start_time": datetime.now().isoformat(),
-                    "last_update": datetime.now().isoformat(),
-                    "error_message": None,
-                    "session_data": {
-                        "model_id": model_id,
-                        "steps_completed": 0
-                    }
+            session_ids = []
+            
+            # Mock different session IDs for each request
+            def create_session(*args, **kwargs):
+                session_id = f"session-{len(session_ids)}"
+                session_ids.append(session_id)
+                return session_id
+            
+            mock_manager.start_optimization_session.side_effect = create_session
+            mock_manager.get_session_status.return_value = {
+                "status": "running",
+                "progress_percentage": 0.0,
+                "current_step": "Starting",
+                "start_time": datetime.now().isoformat(),
+                "last_update": datetime.now().isoformat(),
+                "error_message": None,
+                "session_data": {
+                    "model_id": model_id,
+                    "steps_completed": 0
                 }
-                
+            }
+            
+            async def mock_get_opt_manager():
+                return mock_manager
+            
+            app.dependency_overrides[get_optimization_manager] = mock_get_opt_manager
+            
+            try:
                 # Start multiple optimization sessions
                 for i in range(3):
                     response = client.post(
@@ -600,6 +680,13 @@ class TestConcurrentOperations:
                 # Verify all sessions were created
                 assert len(session_ids) == 3
                 assert len(set(session_ids)) == 3  # All unique
+            finally:
+                # Restore original override
+                async def mock_get_optimization_manager():
+                    mock_mgr = MagicMock(spec=OptimizationManager)
+                    mock_mgr.get_active_sessions.return_value = []
+                    return mock_mgr
+                app.dependency_overrides[get_optimization_manager] = mock_get_optimization_manager
         
         finally:
             client.delete(f"/models/{model_id}", headers=auth_headers)

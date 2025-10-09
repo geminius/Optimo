@@ -205,9 +205,10 @@ class PlatformIntegrator:
         
         # Initialize model store
         model_store_config = self.config.get("model_store", {})
-        self.model_store = ModelStore(model_store_config)
-        if not self.model_store.initialize():
-            raise RuntimeError("Failed to initialize ModelStore")
+        storage_path = model_store_config.get("storage_path", "models")
+        enable_versioning = model_store_config.get("enable_versioning", False)
+        self.model_store = ModelStore(storage_path, enable_versioning)
+        # ModelStore doesn't have initialize() method - it initializes in __init__
         
         # Initialize memory manager
         memory_config = self.config.get("memory_manager", {})
@@ -216,10 +217,8 @@ class PlatformIntegrator:
             raise RuntimeError("Failed to initialize MemoryManager")
         
         # Initialize notification service
-        notification_config = self.config.get("notification_service", {})
-        self.notification_service = NotificationService(notification_config)
-        if not self.notification_service.initialize():
-            raise RuntimeError("Failed to initialize NotificationService")
+        # NotificationService doesn't take config and doesn't have initialize() method
+        self.notification_service = NotificationService()
         
         # Initialize monitoring service
         monitoring_config = self.config.get("monitoring_service", {})
@@ -420,9 +419,12 @@ class PlatformIntegrator:
                 pass
             
             # Test optimization manager
-            active_sessions = self.optimization_manager.get_active_sessions()
-            if not isinstance(active_sessions, list):
-                raise RuntimeError("get_active_sessions() should return a list")
+            try:
+                active_sessions = self.optimization_manager.get_active_sessions()
+                if not isinstance(active_sessions, list):
+                    raise RuntimeError(f"get_active_sessions() should return a list, got {type(active_sessions)}: {active_sessions}")
+            except Exception as e:
+                raise RuntimeError(f"get_active_sessions() failed: {type(e).__name__}: {e}")
             
             self.logger.info("Integration validation completed successfully")
             

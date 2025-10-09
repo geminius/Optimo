@@ -112,15 +112,17 @@ class ConcurrentOptimizationStressTester:
     
     def create_mock_optimization_manager(self) -> OptimizationManager:
         """Create a mock optimization manager for testing."""
-        model_store = MagicMock(spec=ModelStore)
-        memory_manager = MagicMock(spec=MemoryManager)
-        notification_service = MagicMock(spec=NotificationService)
+        config = {
+            "max_concurrent_sessions": 10,
+            "auto_rollback_on_failure": True,
+            "analysis_agent": {},
+            "planning_agent": {},
+            "evaluation_agent": {},
+            "quantization_agent": {},
+            "pruning_agent": {}
+        }
         
-        manager = OptimizationManager(
-            model_store=model_store,
-            memory_manager=memory_manager,
-            notification_service=notification_service
-        )
+        manager = OptimizationManager(config)
         
         # Mock successful optimization
         async def mock_optimize(*args, **kwargs):

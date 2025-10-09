@@ -376,13 +376,27 @@ async def start_optimization(
         
         model_path = str(model_files[0])
         
-        # Create optimization criteria
+        # Create optimization criteria with new API
+        from src.config.optimization_criteria import OptimizationConstraints, OptimizationTechnique
+        
+        # Convert technique strings to enum
+        techniques = []
+        for tech in (request.optimization_techniques or ["quantization", "pruning"]):
+            try:
+                techniques.append(OptimizationTechnique(tech.lower()))
+            except ValueError:
+                pass  # Skip invalid techniques
+        
+        constraints = OptimizationConstraints(
+            preserve_accuracy_threshold=request.target_accuracy_threshold or 0.95,
+            allowed_techniques=techniques if techniques else [OptimizationTechnique.QUANTIZATION, OptimizationTechnique.PRUNING]
+        )
+        
         criteria = OptimizationCriteria(
             name=request.criteria_name or "default",
-            target_accuracy_threshold=request.target_accuracy_threshold,
-            max_size_reduction_percent=request.max_size_reduction_percent,
-            max_latency_increase_percent=request.max_latency_increase_percent,
-            optimization_techniques=request.optimization_techniques or ["quantization", "pruning"]
+            description=f"API optimization request for model {request.model_id}",
+            constraints=constraints,
+            target_deployment="general"
         )
         
         # Start optimization session
