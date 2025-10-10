@@ -154,45 +154,8 @@ class AnalysisAgent(BaseAnalysisAgent):
     
     def _load_model(self, model_path: str) -> torch.nn.Module:
         """Load model from file path."""
-        path = Path(model_path)
-        
-        if not path.exists():
-            raise FileNotFoundError(f"Model file not found: {model_path}")
-        
-        try:
-            # Try loading as PyTorch model
-            if path.suffix in ['.pt', '.pth']:
-                # Load model - custom classes must be importable via PYTHONPATH or sys.path
-                # For test models, ensure test_models is in sys.path before calling this
-                model = torch.load(model_path, map_location=self.device, weights_only=False)
-                
-                if isinstance(model, dict) and 'model' in model:
-                    model = model['model']
-                elif isinstance(model, dict) and 'state_dict' in model:
-                    # Need to reconstruct model architecture - this is a limitation
-                    raise ValueError("State dict found but no model architecture")
-            else:
-                raise ValueError(f"Unsupported model format: {path.suffix}")
-            
-            return model.to(self.device)
-            
-        except AttributeError as e:
-            # This typically happens when a custom model class isn't importable
-            if "Can't get attribute" in str(e):
-                logger.error(
-                    f"Failed to load model: Custom model class not found. "
-                    f"Ensure the model's class is importable (e.g., add its directory to sys.path "
-                    f"or install the package). Error: {e}"
-                )
-                raise ImportError(
-                    f"Model class not found. For custom models, ensure the class is importable. "
-                    f"For test models, add 'test_models' to sys.path before loading. "
-                    f"Original error: {e}"
-                ) from e
-            raise
-        except Exception as e:
-            logger.error(f"Failed to load model: {e}")
-            raise
+        from ...utils.model_utils import load_model
+        return load_model(model_path, self.device, weights_only=False)
     
     def _extract_model_metadata(self, model_path: str, model: torch.nn.Module) -> ModelMetadata:
         """Extract metadata from model."""
@@ -516,80 +479,18 @@ class AnalysisAgent(BaseAnalysisAgent):
     
     def _calculate_model_depth(self, model: torch.nn.Module) -> int:
         """Calculate approximate model depth."""
-        max_depth = 0
-        
-        def calculate_depth(module, current_depth=0):
-            nonlocal max_depth
-            max_depth = max(max_depth, current_depth)
-            
-            for child in module.children():
-                calculate_depth(child, current_depth + 1)
-        
-        calculate_depth(model)
-        return max_depth
+        from ...utils.model_utils import calculate_model_depth
+        return calculate_model_depth(model)
     
     def _find_compatible_input(self, model: torch.nn.Module) -> torch.Tensor:
         """Find a compatible input shape for the model."""
-        # First, try to infer input size from first leaf layer
-        try:
-            for name, module in model.named_modules():
-                if len(list(module.children())) == 0:  # Leaf module
-                    if hasattr(module, 'in_features'):
-                        # Linear layer - try 1D input
-                        input_size = module.in_features
-                        dummy_input = torch.randn(1, input_size).to(self.device)
-                        with torch.no_grad():
-                            _ = model(dummy_input)
-                        logger.info(f"Found compatible input shape from first layer: (1, {input_size})")
-                        return dummy_input
-                    elif hasattr(module, 'in_channels'):
-                        # Conv layer - try 2D input
-                        in_channels = module.in_channels
-                        dummy_input = torch.randn(1, in_channels, 224, 224).to(self.device)
-                        with torch.no_grad():
-                            _ = model(dummy_input)
-                        logger.info(f"Found compatible input shape from first layer: (1, {in_channels}, 224, 224)")
-                        return dummy_input
-                    break  # Only check first leaf layer
-        except Exception as e:
-            logger.debug(f"Could not infer from first layer: {e}")
-        
-        # Try common input shapes
-        common_shapes = [
-            (1, 3, 224, 224),  # Standard image
-            (1, 3, 256, 256),  # Larger image
-            (1, 1, 28, 28),    # MNIST-like
-            (1, 512),          # 1D input
-            (1, 1024),         # Larger 1D input
-            (1, 1280),         # VLA models
-            (1, 1000),         # Common large input
-            (1, 2048),         # Very large input
-            (1, 768),          # BERT-like
-        ]
-        
-        for shape in common_shapes:
-            try:
-                dummy_input = torch.randn(shape).to(self.device)
-                with torch.no_grad():
-                    _ = model(dummy_input)
-                logger.info(f"Found compatible input shape: {shape}")
-                return dummy_input
-            except Exception:
-                continue
-        
-        # If nothing works, raise an error instead of returning invalid input
-        raise ValueError(
-            "Could not find compatible input shape for model. "
-            "Please ensure the model has a standard input format or provide input shape explicitly."
-        )
+        from ...utils.model_utils import find_compatible_input
+        return find_compatible_input(model, self.device)
     
     def _get_memory_usage(self) -> float:
         """Get current memory usage in MB."""
-        if torch.cuda.is_available():
-            return torch.cuda.memory_allocated() / (1024 * 1024)
-        else:
-            process = psutil.Process()
-            return process.memory_info().rss / (1024 * 1024)
+        from ...utils.model_utils import get_memory_usage
+        return get_memory_usage()
     
     def _get_gpu_utilization(self) -> float:
         """Get GPU utilization percentage."""

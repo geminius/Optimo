@@ -662,19 +662,6 @@ class PruningAgent(BaseOptimizationAgent):
     
     def _create_dummy_input(self, model: torch.nn.Module) -> torch.Tensor:
         """Create dummy input for model testing."""
-        # Try to infer input shape from first layer
-        first_layer = None
-        for module in model.modules():
-            if isinstance(module, (nn.Linear, nn.Conv2d, nn.Conv1d)):
-                first_layer = module
-                break
-        
-        if isinstance(first_layer, nn.Linear):
-            return torch.randn(1, first_layer.in_features)
-        elif isinstance(first_layer, nn.Conv2d):
-            return torch.randn(1, first_layer.in_channels, 224, 224)  # Common image size
-        elif isinstance(first_layer, nn.Conv1d):
-            return torch.randn(1, first_layer.in_channels, 100)  # Common sequence length
-        else:
-            # Default fallback
-            return torch.randn(1, 768)  # Common transformer hidden size
+        from ...utils.model_utils import create_dummy_input
+        device = next(model.parameters()).device if list(model.parameters()) else torch.device('cpu')
+        return create_dummy_input(model, device)
