@@ -162,6 +162,23 @@ class AnalysisAgent(BaseAnalysisAgent):
         try:
             # Try loading as PyTorch model
             if path.suffix in ['.pt', '.pth']:
+                # For test models, try to import the model class definition
+                # This allows loading models with custom classes
+                if 'test_models' in str(path):
+                    try:
+                        import sys
+                        model_dir = path.parent
+                        if str(model_dir) not in sys.path:
+                            sys.path.insert(0, str(model_dir))
+                        # Try to import common test model classes
+                        try:
+                            from robotics_vla_model import RoboticsVLAModel
+                            logger.debug("Imported RoboticsVLAModel for loading")
+                        except ImportError:
+                            pass
+                    except Exception as e:
+                        logger.debug(f"Could not import test model classes: {e}")
+                
                 # Use weights_only=False for testing purposes - in production this should be more secure
                 model = torch.load(model_path, map_location=self.device, weights_only=False)
                 if isinstance(model, dict) and 'model' in model:
@@ -514,6 +531,30 @@ class AnalysisAgent(BaseAnalysisAgent):
     
     def _find_compatible_input(self, model: torch.nn.Module) -> torch.Tensor:
         """Find a compatible input shape for the model."""
+        # First, try to infer input size from first leaf layer
+        try:
+            for name, module in model.named_modules():
+                if len(list(module.children())) == 0:  # Leaf module
+                    if hasattr(module, 'in_features'):
+                        # Linear layer - try 1D input
+                        input_size = module.in_features
+                        dummy_input = torch.randn(1, input_size).to(self.device)
+                        with torch.no_grad():
+                            _ = model(dummy_input)
+                        logger.info(f"Found compatible input shape from first layer: (1, {input_size})")
+                        return dummy_input
+                    elif hasattr(module, 'in_channels'):
+                        # Conv layer - try 2D input
+                        in_channels = module.in_channels
+                        dummy_input = torch.randn(1, in_channels, 224, 224).to(self.device)
+                        with torch.no_grad():
+                            _ = model(dummy_input)
+                        logger.info(f"Found compatible input shape from first layer: (1, {in_channels}, 224, 224)")
+                        return dummy_input
+                    break  # Only check first leaf layer
+        except Exception as e:
+            logger.debug(f"Could not infer from first layer: {e}")
+        
         # Try common input shapes
         common_shapes = [
             (1, 3, 224, 224),  # Standard image
@@ -521,8 +562,10 @@ class AnalysisAgent(BaseAnalysisAgent):
             (1, 1, 28, 28),    # MNIST-like
             (1, 512),          # 1D input
             (1, 1024),         # Larger 1D input
+            (1, 1280),         # VLA models
             (1, 1000),         # Common large input
             (1, 2048),         # Very large input
+            (1, 768),          # BERT-like
         ]
         
         for shape in common_shapes:
@@ -530,32 +573,16 @@ class AnalysisAgent(BaseAnalysisAgent):
                 dummy_input = torch.randn(shape).to(self.device)
                 with torch.no_grad():
                     _ = model(dummy_input)
+                logger.info(f"Found compatible input shape: {shape}")
                 return dummy_input
             except Exception:
                 continue
         
-        # Try to infer input size from first layer
-        try:
-            first_layer = next(model.modules())
-            if hasattr(first_layer, 'in_features'):
-                # Linear layer
-                input_size = first_layer.in_features
-                dummy_input = torch.randn(1, input_size).to(self.device)
-                with torch.no_grad():
-                    _ = model(dummy_input)
-                return dummy_input
-            elif hasattr(first_layer, 'in_channels'):
-                # Conv layer
-                in_channels = first_layer.in_channels
-                dummy_input = torch.randn(1, in_channels, 224, 224).to(self.device)
-                with torch.no_grad():
-                    _ = model(dummy_input)
-                return dummy_input
-        except Exception:
-            pass
-        
-        # If nothing works, return a basic tensor
-        return torch.randn(1, 1).to(self.device)
+        # If nothing works, raise an error instead of returning invalid input
+        raise ValueError(
+            "Could not find compatible input shape for model. "
+            "Please ensure the model has a standard input format or provide input shape explicitly."
+        )
     
     def _get_memory_usage(self) -> float:
         """Get current memory usage in MB."""
