@@ -7,11 +7,12 @@ session management, and rollback mechanisms.
 """
 
 import logging
+import os
 import time
 import uuid
 import asyncio
 from typing import Dict, List, Any, Optional, Callable, Union
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 import threading
@@ -863,7 +864,6 @@ class OptimizationManager:
             self.logger.info(f"Attempting graceful degradation with techniques: {degraded_techniques}")
             
             # Create degraded plan by filtering steps
-            from dataclasses import replace
             degraded_steps = [step for step in optimization_plan.steps if step.technique in degraded_techniques]
             degraded_plan = replace(optimization_plan, steps=degraded_steps)
             
@@ -1129,8 +1129,6 @@ class OptimizationManager:
         model_path: str
     ) -> None:
         """Aggregate metrics from optimization steps into the results summary."""
-        import os
-        
         # Get original model size from file
         if os.path.exists(model_path):
             original_file_size_mb = os.path.getsize(model_path) / (1024 * 1024)
