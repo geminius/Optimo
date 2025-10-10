@@ -162,25 +162,10 @@ class AnalysisAgent(BaseAnalysisAgent):
         try:
             # Try loading as PyTorch model
             if path.suffix in ['.pt', '.pth']:
-                # For test models, try to import the model class definition
-                # This allows loading models with custom classes
-                if 'test_models' in str(path):
-                    try:
-                        import sys
-                        model_dir = path.parent
-                        if str(model_dir) not in sys.path:
-                            sys.path.insert(0, str(model_dir))
-                        # Try to import common test model classes
-                        try:
-                            from robotics_vla_model import RoboticsVLAModel
-                            logger.debug("Imported RoboticsVLAModel for loading")
-                        except ImportError:
-                            pass
-                    except Exception as e:
-                        logger.debug(f"Could not import test model classes: {e}")
-                
-                # Use weights_only=False for testing purposes - in production this should be more secure
+                # Load model - custom classes must be importable via PYTHONPATH or sys.path
+                # For test models, ensure test_models is in sys.path before calling this
                 model = torch.load(model_path, map_location=self.device, weights_only=False)
+                
                 if isinstance(model, dict) and 'model' in model:
                     model = model['model']
                 elif isinstance(model, dict) and 'state_dict' in model:
@@ -191,6 +176,20 @@ class AnalysisAgent(BaseAnalysisAgent):
             
             return model.to(self.device)
             
+        except AttributeError as e:
+            # This typically happens when a custom model class isn't importable
+            if "Can't get attribute" in str(e):
+                logger.error(
+                    f"Failed to load model: Custom model class not found. "
+                    f"Ensure the model's class is importable (e.g., add its directory to sys.path "
+                    f"or install the package). Error: {e}"
+                )
+                raise ImportError(
+                    f"Model class not found. For custom models, ensure the class is importable. "
+                    f"For test models, add 'test_models' to sys.path before loading. "
+                    f"Original error: {e}"
+                ) from e
+            raise
         except Exception as e:
             logger.error(f"Failed to load model: {e}")
             raise

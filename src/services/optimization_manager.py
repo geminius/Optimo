@@ -1118,7 +1118,6 @@ class OptimizationManager:
             results_summary.original_model_size_mb = original_file_size_mb
         
         # Aggregate metrics from each optimization step
-        total_param_reduction = 0.0
         original_params = 0
         optimized_params = 0
         
@@ -1130,20 +1129,19 @@ class OptimizationManager:
             if hasattr(step_result, 'performance_metrics') and step_result.performance_metrics:
                 metrics = step_result.performance_metrics
                 
-                # Parameter counts
+                # Parameter counts - track the original and final optimized counts
                 if 'original_parameters' in metrics:
-                    original_params = max(original_params, metrics['original_parameters'])
+                    # Use the original count from the first step
+                    if original_params == 0:
+                        original_params = metrics['original_parameters']
                 
                 if 'optimized_parameters' in metrics:
+                    # Always use the latest optimized count (cumulative effect)
                     optimized_params = metrics['optimized_parameters']
-                
-                # Parameter reduction ratio
-                if 'parameter_reduction_ratio' in metrics:
-                    total_param_reduction += metrics['parameter_reduction_ratio']
                 
                 # Add other metrics to performance improvements
                 for metric_name, metric_value in metrics.items():
-                    if metric_name not in ['original_parameters', 'optimized_parameters']:
+                    if metric_name not in ['original_parameters', 'optimized_parameters', 'parameter_reduction_ratio']:
                         if isinstance(metric_value, (int, float)):
                             results_summary.performance_improvements[metric_name] = metric_value
         
@@ -1167,8 +1165,15 @@ class OptimizationManager:
                 ) * 100
                 results_summary.size_reduction_percent = size_reduction
             
+            # Calculate total parameter reduction from aggregated counts
+            # This is correct because it accounts for the cumulative effect of all optimizations
+            if original_params > 0:
+                param_reduction_percent = ((original_params - optimized_params) / original_params) * 100
+            else:
+                param_reduction_percent = 0.0
+            
             # Add parameter metrics to performance improvements
-            results_summary.performance_improvements['parameter_reduction_percent'] = total_param_reduction * 100
+            results_summary.performance_improvements['parameter_reduction_percent'] = param_reduction_percent
             results_summary.performance_improvements['original_parameters'] = original_params
             results_summary.performance_improvements['optimized_parameters'] = optimized_params
         
@@ -1194,9 +1199,10 @@ class OptimizationManager:
         )
         
         if original_params > 0:
+            param_reduction_percent = ((original_params - optimized_params) / original_params) * 100
             self.logger.info(
                 f"Parameters: {original_params:,} → {optimized_params:,} "
-                f"({total_param_reduction * 100:.2f}% reduction)"
+                f"({param_reduction_percent:.2f}% reduction)"
             )
     
     def _handle_workflow_failure(self, session_id: str, error_message: str) -> None:
