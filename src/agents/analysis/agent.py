@@ -154,29 +154,8 @@ class AnalysisAgent(BaseAnalysisAgent):
     
     def _load_model(self, model_path: str) -> torch.nn.Module:
         """Load model from file path."""
-        path = Path(model_path)
-        
-        if not path.exists():
-            raise FileNotFoundError(f"Model file not found: {model_path}")
-        
-        try:
-            # Try loading as PyTorch model
-            if path.suffix in ['.pt', '.pth']:
-                # Use weights_only=False for testing purposes - in production this should be more secure
-                model = torch.load(model_path, map_location=self.device, weights_only=False)
-                if isinstance(model, dict) and 'model' in model:
-                    model = model['model']
-                elif isinstance(model, dict) and 'state_dict' in model:
-                    # Need to reconstruct model architecture - this is a limitation
-                    raise ValueError("State dict found but no model architecture")
-            else:
-                raise ValueError(f"Unsupported model format: {path.suffix}")
-            
-            return model.to(self.device)
-            
-        except Exception as e:
-            logger.error(f"Failed to load model: {e}")
-            raise
+        from ...utils.model_utils import load_model
+        return load_model(model_path, self.device, weights_only=False)
     
     def _extract_model_metadata(self, model_path: str, model: torch.nn.Module) -> ModelMetadata:
         """Extract metadata from model."""
@@ -500,70 +479,18 @@ class AnalysisAgent(BaseAnalysisAgent):
     
     def _calculate_model_depth(self, model: torch.nn.Module) -> int:
         """Calculate approximate model depth."""
-        max_depth = 0
-        
-        def calculate_depth(module, current_depth=0):
-            nonlocal max_depth
-            max_depth = max(max_depth, current_depth)
-            
-            for child in module.children():
-                calculate_depth(child, current_depth + 1)
-        
-        calculate_depth(model)
-        return max_depth
+        from ...utils.model_utils import calculate_model_depth
+        return calculate_model_depth(model)
     
     def _find_compatible_input(self, model: torch.nn.Module) -> torch.Tensor:
         """Find a compatible input shape for the model."""
-        # Try common input shapes
-        common_shapes = [
-            (1, 3, 224, 224),  # Standard image
-            (1, 3, 256, 256),  # Larger image
-            (1, 1, 28, 28),    # MNIST-like
-            (1, 512),          # 1D input
-            (1, 1024),         # Larger 1D input
-            (1, 1000),         # Common large input
-            (1, 2048),         # Very large input
-        ]
-        
-        for shape in common_shapes:
-            try:
-                dummy_input = torch.randn(shape).to(self.device)
-                with torch.no_grad():
-                    _ = model(dummy_input)
-                return dummy_input
-            except Exception:
-                continue
-        
-        # Try to infer input size from first layer
-        try:
-            first_layer = next(model.modules())
-            if hasattr(first_layer, 'in_features'):
-                # Linear layer
-                input_size = first_layer.in_features
-                dummy_input = torch.randn(1, input_size).to(self.device)
-                with torch.no_grad():
-                    _ = model(dummy_input)
-                return dummy_input
-            elif hasattr(first_layer, 'in_channels'):
-                # Conv layer
-                in_channels = first_layer.in_channels
-                dummy_input = torch.randn(1, in_channels, 224, 224).to(self.device)
-                with torch.no_grad():
-                    _ = model(dummy_input)
-                return dummy_input
-        except Exception:
-            pass
-        
-        # If nothing works, return a basic tensor
-        return torch.randn(1, 1).to(self.device)
+        from ...utils.model_utils import find_compatible_input
+        return find_compatible_input(model, self.device)
     
     def _get_memory_usage(self) -> float:
         """Get current memory usage in MB."""
-        if torch.cuda.is_available():
-            return torch.cuda.memory_allocated() / (1024 * 1024)
-        else:
-            process = psutil.Process()
-            return process.memory_info().rss / (1024 * 1024)
+        from ...utils.model_utils import get_memory_usage
+        return get_memory_usage()
     
     def _get_gpu_utilization(self) -> float:
         """Get GPU utilization percentage."""

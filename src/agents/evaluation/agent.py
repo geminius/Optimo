@@ -556,36 +556,13 @@ class EvaluationAgent(BaseEvaluationAgent):
     
     def _find_compatible_input(self, model: torch.nn.Module) -> torch.Tensor:
         """Find a compatible input shape for the model."""
-        # Try common input shapes
-        common_shapes = [
-            (1, 3, 224, 224),  # Standard image
-            (1, 3, 256, 256),  # Larger image
-            (1, 1, 28, 28),    # MNIST-like
-            (1, 512),          # 1D input
-            (1, 1024),         # Larger 1D input
-            (1, 1000),         # Common large input
-            (1, 2048),         # Very large input
-        ]
-        
-        for shape in common_shapes:
-            try:
-                dummy_input = torch.randn(shape).to(self.device)
-                with torch.no_grad():
-                    _ = model(dummy_input)
-                return dummy_input
-            except Exception:
-                continue
-        
-        # If nothing works, return a basic tensor
-        return torch.randn(1, 1).to(self.device)
+        from ...utils.model_utils import find_compatible_input
+        return find_compatible_input(model, self.device)
     
     def _get_memory_usage(self) -> float:
         """Get current memory usage in MB."""
-        if torch.cuda.is_available():
-            return torch.cuda.memory_allocated() / (1024 * 1024)
-        else:
-            process = psutil.Process()
-            return process.memory_info().rss / (1024 * 1024)
+        from ...utils.model_utils import get_memory_usage
+        return get_memory_usage()
     
     def _update_performance_metrics(self, metrics: PerformanceMetrics, 
                                    benchmark_result: BenchmarkResult) -> None:

@@ -7,11 +7,12 @@ session management, and rollback mechanisms.
 """
 
 import logging
+import os
 import time
 import uuid
 import asyncio
 from typing import Dict, List, Any, Optional, Callable, Union
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 import threading
@@ -819,11 +820,12 @@ class OptimizationManager:
         self,
         session_id: str,
         model_path: str,
-        optimization_plan: Dict[str, Any],
+        optimization_plan,  # OptimizationPlan object
         recovery_context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Execute optimization phase with graceful degradation and recovery."""
-        original_techniques = optimization_plan.get("techniques", [])
+        # Extract techniques from plan steps
+        original_techniques = [step.technique for step in optimization_plan.steps]
         failed_techniques = []
         
         # Try the original plan first
@@ -858,10 +860,12 @@ class OptimizationManager:
                 else:
                     raise opt_error
             
-            # Try degraded plan
+            # Try degraded plan - create new plan with degraded techniques
             self.logger.info(f"Attempting graceful degradation with techniques: {degraded_techniques}")
-            degraded_plan = optimization_plan.copy()
-            degraded_plan["techniques"] = degraded_techniques
+            
+            # Create degraded plan by filtering steps
+            degraded_steps = [step for step in optimization_plan.steps if step.technique in degraded_techniques]
+            degraded_plan = replace(optimization_plan, steps=degraded_steps)
             
             try:
                 result = self._execute_optimization_phase(session_id, model_path, degraded_plan)
@@ -878,12 +882,12 @@ class OptimizationManager:
                 )
                 
                 if recovery_manager.handle_error(final_error, recovery_context):
-                    # Last attempt with minimal optimization
-                    minimal_plan = {
-                        "techniques": [degraded_techniques[0]] if degraded_techniques else [],
-                        "steps": []
-                    }
-                    return self._execute_optimization_phase(session_id, model_path, minimal_plan)
+                    # Last attempt with minimal optimization - use first step only
+                    if optimization_plan.steps:
+                        minimal_plan = replace(optimization_plan, steps=[optimization_plan.steps[0]])
+                        return self._execute_optimization_phase(session_id, model_path, minimal_plan)
+                    else:
+                        raise final_error
                 else:
                     raise final_error
     
@@ -1068,9 +1072,18 @@ class OptimizationManager:
                     validation_passed=evaluation_report.validation_status.value == "passed"
                 )
                 
+                # Aggregate metrics from optimization steps
+                self._aggregate_optimization_metrics(
+                    results_summary, 
+                    optimization_results, 
+                    session.model_id  # model_id contains the model path
+                )
+                
                 # Add performance improvements from evaluation
                 if evaluation_report.comparison_baseline:
-                    results_summary.performance_improvements = evaluation_report.comparison_baseline.improvements
+                    results_summary.performance_improvements.update(
+                        evaluation_report.comparison_baseline.improvements
+                    )
                 
                 session.results = results_summary
                 
@@ -1089,6 +1102,122 @@ class OptimizationManager:
         except Exception as e:
             self.logger.error(f"Error completing session {session_id}: {e}")
             self._handle_workflow_failure(session_id, f"Completion error: {str(e)}")
+    
+    def _calculate_size_reduction_percent(
+        self,
+        original_size_mb: float,
+        optimized_size_mb: float
+    ) -> float:
+        """
+        Calculate size reduction percentage.
+        
+        Args:
+            original_size_mb: Original model size in MB
+            optimized_size_mb: Optimized model size in MB
+            
+        Returns:
+            float: Size reduction percentage
+        """
+        if original_size_mb > 0:
+            return ((original_size_mb - optimized_size_mb) / original_size_mb) * 100
+        return 0.0
+    
+    def _aggregate_optimization_metrics(
+        self,
+        results_summary,
+        optimization_results: Dict[str, Any],
+        model_path: str
+    ) -> None:
+        """Aggregate metrics from optimization steps into the results summary."""
+        # Get original model size from file
+        if os.path.exists(model_path):
+            original_file_size_mb = os.path.getsize(model_path) / (1024 * 1024)
+            results_summary.original_model_size_mb = original_file_size_mb
+        
+        # Aggregate metrics from each optimization step
+        original_params = 0
+        optimized_params = 0
+        
+        for step_result in optimization_results.get('step_results', []):
+            if not step_result.success:
+                continue
+            
+            # Extract metrics from step
+            if hasattr(step_result, 'performance_metrics') and step_result.performance_metrics:
+                metrics = step_result.performance_metrics
+                
+                # Parameter counts - track the original and final optimized counts
+                if 'original_parameters' in metrics:
+                    # Use the original count from the first step
+                    if original_params == 0:
+                        original_params = metrics['original_parameters']
+                
+                if 'optimized_parameters' in metrics:
+                    # Always use the latest optimized count (cumulative effect)
+                    optimized_params = metrics['optimized_parameters']
+                
+                # Add other metrics to performance improvements
+                for metric_name, metric_value in metrics.items():
+                    if metric_name not in ['original_parameters', 'optimized_parameters', 'parameter_reduction_ratio']:
+                        if isinstance(metric_value, (int, float)):
+                            results_summary.performance_improvements[metric_name] = metric_value
+        
+        # Calculate model sizes from parameters if we have them
+        if original_params > 0 and optimized_params > 0:
+            # Estimate size: parameters * 4 bytes (float32) / (1024 * 1024) for MB
+            estimated_original_mb = (original_params * 4) / (1024 * 1024)
+            estimated_optimized_mb = (optimized_params * 4) / (1024 * 1024)
+            
+            # Use file size if available, otherwise use parameter-based estimate
+            if results_summary.original_model_size_mb == 0.0:
+                results_summary.original_model_size_mb = estimated_original_mb
+            
+            results_summary.optimized_model_size_mb = estimated_optimized_mb
+            
+            # Calculate size reduction percentage
+            results_summary.size_reduction_percent = self._calculate_size_reduction_percent(
+                results_summary.original_model_size_mb,
+                results_summary.optimized_model_size_mb
+            )
+            
+            # Calculate total parameter reduction from aggregated counts
+            # This is correct because it accounts for the cumulative effect of all optimizations
+            if original_params > 0:
+                param_reduction_percent = ((original_params - optimized_params) / original_params) * 100
+            else:
+                param_reduction_percent = 0.0
+            
+            # Add parameter metrics to performance improvements
+            results_summary.performance_improvements['parameter_reduction_percent'] = param_reduction_percent
+            results_summary.performance_improvements['original_parameters'] = original_params
+            results_summary.performance_improvements['optimized_parameters'] = optimized_params
+        
+        # Check if optimized model was saved
+        if 'final_model' in optimization_results and optimization_results['final_model']:
+            final_model_path = optimization_results.get('final_model_path')
+            if final_model_path and os.path.exists(final_model_path):
+                optimized_file_size_mb = os.path.getsize(final_model_path) / (1024 * 1024)
+                results_summary.optimized_model_size_mb = optimized_file_size_mb
+                
+                # Recalculate size reduction with actual file size
+                results_summary.size_reduction_percent = self._calculate_size_reduction_percent(
+                    results_summary.original_model_size_mb,
+                    optimized_file_size_mb
+                )
+        
+        # Log aggregated metrics
+        self.logger.info(
+            f"Aggregated metrics: {results_summary.original_model_size_mb:.2f} MB → "
+            f"{results_summary.optimized_model_size_mb:.2f} MB "
+            f"({results_summary.size_reduction_percent:.2f}% reduction)"
+        )
+        
+        if original_params > 0:
+            param_reduction_percent = ((original_params - optimized_params) / original_params) * 100
+            self.logger.info(
+                f"Parameters: {original_params:,} → {optimized_params:,} "
+                f"({param_reduction_percent:.2f}% reduction)"
+            )
     
     def _handle_workflow_failure(self, session_id: str, error_message: str) -> None:
         """Handle workflow failure with proper cleanup and rollback."""
