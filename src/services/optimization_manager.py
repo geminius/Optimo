@@ -1103,6 +1103,25 @@ class OptimizationManager:
             self.logger.error(f"Error completing session {session_id}: {e}")
             self._handle_workflow_failure(session_id, f"Completion error: {str(e)}")
     
+    def _calculate_size_reduction_percent(
+        self,
+        original_size_mb: float,
+        optimized_size_mb: float
+    ) -> float:
+        """
+        Calculate size reduction percentage.
+        
+        Args:
+            original_size_mb: Original model size in MB
+            optimized_size_mb: Optimized model size in MB
+            
+        Returns:
+            float: Size reduction percentage
+        """
+        if original_size_mb > 0:
+            return ((original_size_mb - optimized_size_mb) / original_size_mb) * 100
+        return 0.0
+    
     def _aggregate_optimization_metrics(
         self,
         results_summary,
@@ -1158,12 +1177,10 @@ class OptimizationManager:
             results_summary.optimized_model_size_mb = estimated_optimized_mb
             
             # Calculate size reduction percentage
-            if results_summary.original_model_size_mb > 0:
-                size_reduction = (
-                    (results_summary.original_model_size_mb - results_summary.optimized_model_size_mb) 
-                    / results_summary.original_model_size_mb
-                ) * 100
-                results_summary.size_reduction_percent = size_reduction
+            results_summary.size_reduction_percent = self._calculate_size_reduction_percent(
+                results_summary.original_model_size_mb,
+                results_summary.optimized_model_size_mb
+            )
             
             # Calculate total parameter reduction from aggregated counts
             # This is correct because it accounts for the cumulative effect of all optimizations
@@ -1184,12 +1201,11 @@ class OptimizationManager:
                 optimized_file_size_mb = os.path.getsize(final_model_path) / (1024 * 1024)
                 results_summary.optimized_model_size_mb = optimized_file_size_mb
                 
-                if results_summary.original_model_size_mb > 0:
-                    size_reduction = (
-                        (results_summary.original_model_size_mb - optimized_file_size_mb) 
-                        / results_summary.original_model_size_mb
-                    ) * 100
-                    results_summary.size_reduction_percent = size_reduction
+                # Recalculate size reduction with actual file size
+                results_summary.size_reduction_percent = self._calculate_size_reduction_percent(
+                    results_summary.original_model_size_mb,
+                    optimized_file_size_mb
+                )
         
         # Log aggregated metrics
         self.logger.info(
