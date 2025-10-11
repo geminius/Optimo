@@ -75,8 +75,6 @@ class MemoryManager:
         # Database configuration
         db_path_str = config.get("database_path", "data/optimization_history.db")
         self.db_path = Path(db_path_str)
-        # Ensure the database directory exists
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.backup_interval_hours = config.get("backup_interval_hours", 24)
         self.retention_days = config.get("retention_days", 90)
         self.max_session_size_mb = config.get("max_session_size_mb", 100)
