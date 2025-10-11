@@ -327,6 +327,25 @@ class PlatformIntegrator:
         if not self.optimization_manager.initialize():
             raise RuntimeError("Failed to initialize OptimizationManager")
         
+        # Connect progress updates from OptimizationManager to NotificationService
+        def progress_callback(session_id: str, update):
+            """Forward progress updates to notification service."""
+            try:
+                self.notification_service.update_progress(
+                    session_id=session_id,
+                    current_step=update.current_step,
+                    step_name=update.step_name,
+                    metadata=update.metadata
+                )
+            except Exception as e:
+                self.logger.error(f"Error forwarding progress update: {e}")
+        
+        self.optimization_manager.add_progress_callback(progress_callback)
+        
+        # Start monitoring service
+        monitoring_interval = self.config.get("monitoring", {}).get("interval", 30)
+        self.monitoring_service.start_monitoring(interval=monitoring_interval)
+        
         # Set up cross-component communication
         await self._setup_component_communication()
         
@@ -477,6 +496,13 @@ class PlatformIntegrator:
     async def _shutdown_core_services(self) -> None:
         """Shutdown core services."""
         self.logger.info("Shutting down core services")
+        
+        # Stop monitoring service first
+        if self.monitoring_service:
+            try:
+                self.monitoring_service.stop_monitoring()
+            except Exception as e:
+                self.logger.error(f"Error stopping monitoring service: {e}")
         
         for service in [self.monitoring_service, self.notification_service, self.memory_manager, self.model_store]:
             if service and hasattr(service, 'cleanup'):
