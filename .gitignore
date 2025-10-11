@@ -166,6 +166,15 @@ Thumbs.db
 *.tmp
 *.temp
 
+# SQLite database files
+optimization_history.db
+optimization_history.db-shm
+optimization_history.db-wal
+
+# Data directory (contains database files)
+data/
+!data/.gitkeep
+
 # Model files (can be large)
 *.pth
 *.pt
