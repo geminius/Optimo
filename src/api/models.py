@@ -2,6 +2,7 @@
 Pydantic models for API request/response validation.
 """
 
+import uuid
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
@@ -49,10 +50,27 @@ class SessionStatusResponse(BaseModel):
     steps_completed: int
 
 
+class OptimizationSessionSummary(BaseModel):
+    """Summary information for an optimization session."""
+    session_id: str = Field(..., description="Unique session identifier")
+    model_id: str = Field(..., description="Model being optimized")
+    model_name: str = Field(..., description="Human-readable model name")
+    status: str = Field(..., description="Current session status")
+    progress_percentage: float = Field(..., ge=0.0, le=100.0, description="Progress percentage")
+    techniques: List[str] = Field(default_factory=list, description="Optimization techniques applied")
+    size_reduction_percent: Optional[float] = Field(None, description="Size reduction achieved")
+    speed_improvement_percent: Optional[float] = Field(None, description="Speed improvement achieved")
+    created_at: datetime = Field(..., description="Session creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
+    completed_at: Optional[datetime] = Field(None, description="Completion timestamp")
+
+
 class SessionListResponse(BaseModel):
-    """Response model for session list."""
-    sessions: List[Dict[str, Any]]
-    total: int
+    """Response model for session list with pagination."""
+    sessions: List[OptimizationSessionSummary] = Field(..., description="List of optimization sessions")
+    total: int = Field(..., description="Total number of sessions matching filters")
+    skip: int = Field(0, description="Number of sessions skipped")
+    limit: int = Field(50, description="Maximum number of sessions returned")
 
 
 class ModelInfo(BaseModel):
@@ -86,10 +104,12 @@ class EvaluationResponse(BaseModel):
 
 
 class ErrorResponse(BaseModel):
-    """Error response model."""
-    error: str
-    message: str
-    details: Optional[str] = None
+    """Standardized error response model with request tracking."""
+    error: str = Field(..., description="Error type/code")
+    message: str = Field(..., description="Human-readable error message")
+    details: Optional[Dict[str, Any]] = Field(None, description="Additional error details")
+    timestamp: datetime = Field(default_factory=datetime.now, description="Error timestamp")
+    request_id: str = Field(default_factory=lambda: str(__import__('uuid').uuid4()), description="Unique request ID for tracking")
 
 
 class HealthResponse(BaseModel):
@@ -98,6 +118,18 @@ class HealthResponse(BaseModel):
     timestamp: datetime
     version: str
     services: Dict[str, bool]
+
+
+class DashboardStats(BaseModel):
+    """Dashboard statistics response model."""
+    total_models: int = Field(..., ge=0, description="Total number of models in the system")
+    active_optimizations: int = Field(..., ge=0, description="Number of currently running optimizations")
+    completed_optimizations: int = Field(..., ge=0, description="Number of completed optimizations")
+    failed_optimizations: int = Field(..., ge=0, description="Number of failed optimizations")
+    average_size_reduction: float = Field(..., description="Average size reduction percentage across completed optimizations")
+    average_speed_improvement: float = Field(..., description="Average speed improvement percentage across completed optimizations")
+    total_sessions: int = Field(..., ge=0, description="Total number of optimization sessions")
+    last_updated: datetime = Field(default_factory=datetime.now, description="Timestamp of last statistics update")
 
 
 class LoginRequest(BaseModel):

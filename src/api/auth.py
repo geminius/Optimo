@@ -5,6 +5,7 @@ Authentication and authorization module for the API.
 import logging
 import jwt
 import hashlib
+import uuid
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 from dataclasses import dataclass
@@ -99,6 +100,7 @@ class AuthManager:
         try:
             # Check if token is in active tokens
             if token not in self.active_tokens:
+                logger.warning("Token not found in active tokens", extra={"component": "AuthManager"})
                 return None
             
             # Decode token
@@ -106,11 +108,13 @@ class AuthManager:
             username = payload.get("sub")
             
             if username is None:
+                logger.warning("Token missing username", extra={"component": "AuthManager"})
                 return None
             
             # Get user data
             user_data = self.users_db.get(username)
             if not user_data or not user_data["is_active"]:
+                logger.warning(f"User not found or inactive: {username}", extra={"component": "AuthManager"})
                 return None
             
             return User(
@@ -121,7 +125,11 @@ class AuthManager:
                 is_active=user_data["is_active"]
             )
             
-        except jwt.PyJWTError:
+        except jwt.ExpiredSignatureError:
+            logger.warning("Token expired", extra={"component": "AuthManager"})
+            return None
+        except jwt.PyJWTError as e:
+            logger.warning(f"Token validation failed: {e}", extra={"component": "AuthManager"})
             return None
     
     def revoke_token(self, token: str) -> bool:
@@ -131,6 +139,18 @@ class AuthManager:
             return True
         return False
     
+    def verify_websocket_token(self, token: str) -> Optional[User]:
+        """
+        Verify token for WebSocket connections.
+        
+        Args:
+            token: JWT token from WebSocket connection
+            
+        Returns:
+            User object if valid, None otherwise
+        """
+        return self.verify_token(token)
+    
     def has_permission(self, user: User, resource: str, action: str) -> bool:
         """Check if user has permission for resource and action."""
         # Simple role-based permissions
@@ -139,7 +159,7 @@ class AuthManager:
         
         if user.role == "user":
             # Users can read their own data and perform basic operations
-            read_permissions = ["models", "sessions", "results"]
+            read_permissions = ["models", "sessions", "results", "config"]
             write_permissions = ["models", "optimize"]
             
             if action == "read" and resource in read_permissions:

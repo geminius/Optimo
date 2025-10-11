@@ -266,6 +266,11 @@ class MemoryManager:
         """
         List optimization sessions with optional filtering.
         
+        Optimized query uses composite indexes for better performance:
+        - idx_sessions_status_created for status + date filtering
+        - idx_sessions_model_status for model + status filtering
+        - idx_sessions_created_desc for pagination
+        
         Args:
             status_filter: List of statuses to filter by
             model_id_filter: Model ID to filter by
@@ -279,7 +284,8 @@ class MemoryManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Build query with filters
+                # Build optimized query with filters
+                # Query structure is designed to use composite indexes
                 query = """
                     SELECT id, model_id, status, criteria_name, created_at,
                            started_at, completed_at, created_by, priority, tags, data_size
@@ -288,15 +294,24 @@ class MemoryManager:
                 """
                 params = []
                 
-                if status_filter:
+                # Add filters in order that matches composite indexes
+                if model_id_filter and status_filter:
+                    # Use idx_sessions_model_status composite index
+                    placeholders = ','.join(['?' for _ in status_filter])
+                    query += f" AND model_id = ? AND status IN ({placeholders})"
+                    params.append(model_id_filter)
+                    params.extend(status_filter)
+                elif status_filter:
+                    # Use idx_sessions_status_created composite index
                     placeholders = ','.join(['?' for _ in status_filter])
                     query += f" AND status IN ({placeholders})"
                     params.extend(status_filter)
-                
-                if model_id_filter:
+                elif model_id_filter:
+                    # Use idx_sessions_model_id index
                     query += " AND model_id = ?"
                     params.append(model_id_filter)
                 
+                # Order by created_at DESC to use indexes effectively
                 query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
                 params.extend([limit, offset])
                 
@@ -319,6 +334,16 @@ class MemoryManager:
                         "data_size": row[10]
                     }
                     sessions.append(session_info)
+                
+                self.logger.debug(
+                    f"Listed {len(sessions)} sessions (filters: status={status_filter}, model_id={model_id_filter})",
+                    extra={
+                        "component": "MemoryManager",
+                        "result_count": len(sessions),
+                        "limit": limit,
+                        "offset": offset
+                    }
+                )
                 
                 return sessions
                 
@@ -579,6 +604,8 @@ class MemoryManager:
         """
         Get statistics about stored sessions.
         
+        Optimized to use a single query with aggregations for better performance.
+        
         Returns:
             Dictionary containing session statistics
         """
@@ -586,38 +613,36 @@ class MemoryManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Total sessions
-                cursor.execute("SELECT COUNT(*) FROM optimization_sessions")
-                total_sessions = cursor.fetchone()[0]
+                # Calculate week ago timestamp once
+                week_ago = (datetime.now() - timedelta(days=7)).isoformat()
                 
-                # Sessions by status
+                # Optimized single query to get most statistics
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total_sessions,
+                        SUM(data_size) as total_size,
+                        SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as recent_sessions,
+                        AVG(CASE 
+                            WHEN status = 'completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL 
+                            THEN (julianday(completed_at) - julianday(started_at)) * 24 * 60 * 60
+                            ELSE NULL 
+                        END) as avg_duration
+                    FROM optimization_sessions
+                """, (week_ago,))
+                
+                row = cursor.fetchone()
+                total_sessions = row[0] or 0
+                total_size = row[1] or 0
+                recent_sessions = row[2] or 0
+                avg_duration = row[3]
+                
+                # Separate query for status distribution (still efficient with index)
                 cursor.execute("""
                     SELECT status, COUNT(*) 
                     FROM optimization_sessions 
                     GROUP BY status
                 """)
                 status_counts = dict(cursor.fetchall())
-                
-                # Total data size
-                cursor.execute("SELECT SUM(data_size) FROM optimization_sessions")
-                total_size = cursor.fetchone()[0] or 0
-                
-                # Recent activity (last 7 days)
-                week_ago = (datetime.now() - timedelta(days=7)).isoformat()
-                cursor.execute("""
-                    SELECT COUNT(*) FROM optimization_sessions 
-                    WHERE created_at >= ?
-                """, (week_ago,))
-                recent_sessions = cursor.fetchone()[0]
-                
-                # Average session duration for completed sessions
-                cursor.execute("""
-                    SELECT AVG(
-                        (julianday(completed_at) - julianday(started_at)) * 24 * 60 * 60
-                    ) FROM optimization_sessions 
-                    WHERE status = 'completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL
-                """)
-                avg_duration = cursor.fetchone()[0]
                 
                 return {
                     "total_sessions": total_sessions,
@@ -750,6 +775,23 @@ class MemoryManager:
                 ON optimization_sessions(created_at)
             """)
             
+            # Composite index for common filter combinations
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_sessions_status_created 
+                ON optimization_sessions(status, created_at DESC)
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_sessions_model_status 
+                ON optimization_sessions(model_id, status, created_at DESC)
+            """)
+            
+            # Index for pagination queries
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_sessions_created_desc 
+                ON optimization_sessions(created_at DESC)
+            """)
+            
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_audit_session_id 
                 ON audit_logs(session_id)
@@ -765,11 +807,22 @@ class MemoryManager:
                 ON audit_logs(event_type)
             """)
             
+            # Composite index for audit log queries
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_audit_session_timestamp 
+                ON audit_logs(session_id, timestamp DESC)
+            """)
+            
             conn.commit()
             self.logger.info("Database schema initialized")
     
     def _get_db_connection(self) -> sqlite3.Connection:
-        """Get a database connection for the current thread."""
+        """
+        Get a database connection for the current thread with optimized settings.
+        
+        Uses thread-local storage for connection pooling and applies
+        performance optimizations for concurrent access.
+        """
         thread_id = threading.get_ident()
         
         if not hasattr(self._thread_local, 'connection'):
@@ -778,10 +831,32 @@ class MemoryManager:
                 timeout=30.0,
                 check_same_thread=False
             )
-            # Enable WAL mode for better concurrency
-            self._thread_local.connection.execute("PRAGMA journal_mode=WAL")
-            self._thread_local.connection.execute("PRAGMA synchronous=NORMAL")
-            self._thread_local.connection.execute("PRAGMA cache_size=10000")
+            
+            # Performance optimizations
+            conn = self._thread_local.connection
+            
+            # Enable WAL mode for better concurrency (allows concurrent reads with writes)
+            conn.execute("PRAGMA journal_mode=WAL")
+            
+            # Use NORMAL synchronous mode for better performance (safe with WAL)
+            conn.execute("PRAGMA synchronous=NORMAL")
+            
+            # Increase cache size for better query performance (10MB)
+            conn.execute("PRAGMA cache_size=-10000")
+            
+            # Use memory for temporary tables
+            conn.execute("PRAGMA temp_store=MEMORY")
+            
+            # Optimize page size for modern systems
+            conn.execute("PRAGMA page_size=4096")
+            
+            # Enable memory-mapped I/O for faster reads (100MB)
+            conn.execute("PRAGMA mmap_size=104857600")
+            
+            # Optimize locking mode for better concurrency
+            conn.execute("PRAGMA locking_mode=NORMAL")
+            
+            self.logger.debug(f"Created optimized database connection for thread {thread_id}")
             
         return self._thread_local.connection
     
