@@ -220,11 +220,8 @@ class PlatformIntegrator:
         # NotificationService doesn't take config and doesn't have initialize() method
         self.notification_service = NotificationService()
         
-        # Initialize monitoring service
-        monitoring_config = self.config.get("monitoring_service", {})
-        self.monitoring_service = MonitoringService(monitoring_config)
-        if not self.monitoring_service.initialize():
-            raise RuntimeError("Failed to initialize MonitoringService")
+        # Initialize monitoring service (pass notification_service, not config)
+        self.monitoring_service = MonitoringService(self.notification_service)
         
         self.logger.info("Core services initialization completed")
     
@@ -339,24 +336,29 @@ class PlatformIntegrator:
         """Set up communication channels between components."""
         self.logger.info("Setting up component communication")
         
-        # Connect notification service to optimization manager
-        if self.optimization_manager and self.notification_service:
-            self.optimization_manager.add_progress_callback(
-                self.notification_service.send_progress_update
-            )
-        
-        # Connect monitoring service to all components
-        if self.monitoring_service:
+        # Connect monitoring integrator to all components
+        if self.monitoring_integrator:
             # Monitor optimization manager
             if self.optimization_manager:
-                self.monitoring_service.add_monitored_component(
+                self.monitoring_integrator.add_monitored_component(
                     "optimization_manager", self.optimization_manager
                 )
             
             # Monitor agents
             for agent_name, agent in self.optimization_agents.items():
-                self.monitoring_service.add_monitored_component(
+                self.monitoring_integrator.add_monitored_component(
                     f"agent_{agent_name}", agent
+                )
+            
+            # Monitor core services
+            if self.memory_manager:
+                self.monitoring_integrator.add_monitored_component(
+                    "memory_manager", self.memory_manager
+                )
+            
+            if self.model_store:
+                self.monitoring_integrator.add_monitored_component(
+                    "model_store", self.model_store
                 )
         
         # Set up logging integration
