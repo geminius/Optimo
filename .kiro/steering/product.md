@@ -7,58 +7,70 @@ inclusion: always
 
 # Robotics Model Optimization Platform
 
-## Product Mission
+## Product Context
 
-Autonomous optimization of robotics models (OpenVLA, Vision-Language-Action models) using specialized AI agents that analyze, plan, optimize, and evaluate with minimal human intervention.
+This platform autonomously optimizes robotics models (OpenVLA, Vision-Language-Action models) using specialized AI agents. The system analyzes, plans, optimizes, and evaluates models with minimal human intervention, targeting edge deployment scenarios.
 
-## Core Design Principles
+## Agent Architecture
 
-**Autonomous Operation** - Agents make intelligent optimization decisions based on model characteristics and predefined criteria. Avoid requiring manual configuration for each model.
+The platform uses four specialized agents with distinct responsibilities:
 
-**Agent-Driven Architecture** - Four specialized agents with clear boundaries:
-- **Analysis Agent**: Model profiling and characteristic detection
-- **Planning Agent**: Strategy selection based on constraints
-- **Optimization Agents**: Execute techniques (quantization, pruning, distillation, architecture search, compression)
-- **Evaluation Agent**: Validate results against criteria
+1. **Analysis Agent** (`src/agents/analysis/`) - Profiles models, detects architecture patterns, identifies optimization opportunities
+2. **Planning Agent** (`src/agents/planning/`) - Selects optimization strategies based on model characteristics and user-defined constraints
+3. **Optimization Agents** (`src/agents/optimization/`) - Execute specific techniques:
+   - Quantization (INT8, INT4, GPTQ, bitsandbytes)
+   - Pruning (structured/unstructured, magnitude-based)
+   - Distillation (teacher-student compression)
+   - Architecture Search (NAS)
+   - Compression (general size reduction)
+4. **Evaluation Agent** (`src/agents/evaluation/`) - Validates results against accuracy, size, and latency criteria
 
-**Robotics-First Constraints** - Prioritize:
-- Real-time inference requirements
-- Edge device limitations (memory, compute)
-- Task-specific accuracy thresholds
-- Deployment environment constraints
+## Optimization Priorities
 
-## Optimization Techniques
+When making optimization decisions, prioritize in this order:
 
-- **Quantization**: INT8, INT4, GPTQ, bitsandbytes
-- **Pruning**: Structured/unstructured, magnitude-based
-- **Knowledge Distillation**: Teacher-student compression
-- **Architecture Search**: Automated NAS
-- **Compression**: General size reduction
+1. **Real-time inference requirements** - Robotics models must meet strict latency constraints
+2. **Edge device constraints** - Memory and compute limitations are hard boundaries
+3. **Task-specific accuracy** - Never sacrifice accuracy below user-defined thresholds
+4. **Deployment environment** - Consider target hardware capabilities
 
-## Model Format Support
+## Model Handling Rules
 
-Supported: PyTorch (.pt, .pth), TensorFlow, ONNX, SafeTensors
+**Supported Formats**: PyTorch (.pt, .pth), TensorFlow, ONNX, SafeTensors
 
-**Always validate format before processing** and provide actionable error messages for unsupported formats.
+- Always validate model format before processing
+- Provide actionable error messages for unsupported formats
+- Never assume model structure - use Analysis Agent to detect architecture
+- Avoid hardcoded model configurations - let agents make decisions based on profiling
 
-## User Experience Requirements
+## User Experience Mandates
 
-**Progress Transparency** - Emit real-time progress events via WebSocket for all long-running operations. Users must see status updates during optimization.
+**Progress Transparency**: All long-running operations MUST emit real-time progress events via WebSocket. Use `self.emit_progress()` in agent implementations.
 
-**Error Recovery** - Failed optimizations must rollback to last known good state. Never leave models corrupted or partially optimized.
+**Error Recovery**: Failed optimizations MUST rollback to last known good state. Use recovery strategies from `src/utils/recovery.py`.
 
-**Evaluation Clarity** - Results must include before/after metrics (accuracy, size, latency) for informed decision-making.
+**Evaluation Clarity**: Results MUST include before/after metrics (accuracy, size, latency, inference time) for comparison.
 
-## API Design Rules
+## Standard Workflow
 
-- REST for CRUD and job submission
-- WebSocket for real-time progress
-- Async/await for all I/O operations
-- Structured error responses with actionable messages
-- Auto-generated OpenAPI docs from FastAPI schemas
+```
+Upload → Analysis → Planning → Optimization → Evaluation → Results
+```
 
-## Primary Workflow
+Users define optimization criteria (target size, accuracy threshold, latency requirements). The system autonomously selects and applies appropriate techniques. All optimization attempts are logged with full metrics for history tracking and comparison.
 
-**Upload → Analysis → Planning → Optimization → Evaluation → Results**
+## API Conventions
 
-Users define optimization criteria (target size, accuracy threshold, latency requirements). All attempts are logged with full metrics for comparison and history tracking.
+- **REST endpoints** for CRUD operations and job submission
+- **WebSocket connections** for real-time progress updates
+- **Async/await** required for all I/O operations
+- **Structured errors** with actionable messages (use custom exceptions from `src/utils/exceptions.py`)
+- **OpenAPI documentation** auto-generated from FastAPI schemas
+
+## Key Behaviors
+
+- Agents should make intelligent decisions based on model characteristics, not require manual configuration per model
+- Always log optimization attempts with full context for debugging and analysis
+- Emit progress events at meaningful milestones (0%, 25%, 50%, 75%, 100%)
+- Validate optimization results against user-defined criteria before marking as successful
+- Store model versions and metadata for rollback capability
