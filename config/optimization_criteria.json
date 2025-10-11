@@ -1,0 +1,37 @@
+{
+  "name": "test_config",
+  "description": "Optimization criteria: test_config",
+  "performance_thresholds": [
+    {
+      "metric": "accuracy",
+      "min_value": 0.95,
+      "max_value": null,
+      "target_value": null,
+      "tolerance": 0.05
+    },
+    {
+      "metric": "model_size",
+      "min_value": null,
+      "max_value": 50.0,
+      "target_value": null,
+      "tolerance": 0.1
+    }
+  ],
+  "constraints": {
+    "max_optimization_time_minutes": 60,
+    "max_memory_usage_gb": 16.0,
+    "preserve_accuracy_threshold": 0.95,
+    "allowed_techniques": [
+      "quantization",
+      "pruning"
+    ],
+    "forbidden_techniques": [],
+    "hardware_constraints": {}
+  },
+  "priority_weights": {
+    "accuracy": 0.5,
+    "model_size": 0.3,
+    "inference_time": 0.2
+  },
+  "target_deployment": "general"
+}
