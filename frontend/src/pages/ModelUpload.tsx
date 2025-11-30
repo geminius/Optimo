@@ -13,6 +13,7 @@ import {
   Divider
 } from 'antd';
 import { InboxOutlined, UploadOutlined } from '@ant-design/icons';
+import { logger } from '../utils/logger';
 import { useNavigate } from 'react-router-dom';
 import apiService from '../services/api';
 import { ModelMetadata } from '../types';
@@ -91,7 +92,7 @@ const ModelUpload: React.FC = () => {
         });
       }, 200);
 
-      const uploadedModel = await apiService.uploadModel(selectedFile, metadata);
+      await apiService.uploadModel(selectedFile, metadata);
       
       clearInterval(progressInterval);
       setUploadProgress(100);
@@ -109,7 +110,7 @@ const ModelUpload: React.FC = () => {
       }, 1500);
       
     } catch (error) {
-      console.error('Upload failed:', error);
+      logger.error('Upload failed:', error);
       message.error('Failed to upload model. Please try again.');
     } finally {
       setUploading(false);

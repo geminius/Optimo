@@ -1,0 +1,79 @@
+/**
+ * Header Component Styles
+ * Responsive header with adaptive title display
+ */
+
+.app-header {
+  height: 64px;
+  line-height: 64px;
+}
+
+.header-title-short {
+  display: none;
+}
+
+.header-title-full {
+  display: inline;
+}
+
+.header-actions {
+  flex-shrink: 0;
+}
+
+/* Tablet and below */
+@media (max-width: 992px) {
+  .app-header {
+    padding: 0 16px !important;
+  }
+
+  .header-title {
+    font-size: 16px !important;
+    padding: 0 16px !important;
+  }
+
+  .header-actions {
+    gap: 12px !important;
+    padding-right: 16px !important;
+  }
+}
+
+/* Mobile devices */
+@media (max-width: 768px) {
+  .app-header {
+    height: auto !important;
+    line-height: normal !important;
+    padding: 12px 16px !important;
+    flex-wrap: wrap;
+  }
+
+  .header-title {
+    font-size: 16px !important;
+    padding: 0 !important;
+    margin-bottom: 8px;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: space-between;
+    padding-right: 0 !important;
+  }
+}
+
+/* Small mobile devices */
+@media (max-width: 480px) {
+  .header-title-full {
+    display: none;
+  }
+
+  .header-title-short {
+    display: inline;
+  }
+
+  .header-title {
+    font-size: 14px !important;
+  }
+
+  .app-header {
+    padding: 8px 12px !important;
+  }
+}

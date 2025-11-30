@@ -2,10 +2,20 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { WebSocketProvider, useWebSocket } from '../contexts/WebSocketContext';
 import { io } from 'socket.io-client';
+import AuthService from '../services/auth';
 
 // Mock socket.io-client
 jest.mock('socket.io-client');
 const mockIo = io as jest.MockedFunction<typeof io>;
+
+// Mock AuthService
+jest.mock('../services/auth', () => ({
+  __esModule: true,
+  default: {
+    getToken: jest.fn(),
+    removeToken: jest.fn(),
+  },
+}));
 
 // Test component that uses the WebSocket context
 const TestComponent: React.FC = () => {
@@ -37,6 +47,8 @@ const TestComponent: React.FC = () => {
 
 describe('WebSocketContext', () => {
   let mockSocket: any;
+  const mockGetToken = AuthService.getToken as jest.MockedFunction<typeof AuthService.getToken>;
+  const mockRemoveToken = AuthService.removeToken as jest.MockedFunction<typeof AuthService.removeToken>;
 
   beforeEach(() => {
     mockSocket = {
@@ -46,6 +58,8 @@ describe('WebSocketContext', () => {
       close: jest.fn(),
     };
     mockIo.mockReturnValue(mockSocket);
+    // Default: return a token so WebSocket connects
+    mockGetToken.mockReturnValue('test-token');
   });
 
   afterEach(() => {
@@ -63,7 +77,7 @@ describe('WebSocketContext', () => {
     expect(mockIo).toHaveBeenCalledWith('http://localhost:8000', {
       transports: ['websocket'],
       auth: {
-        token: null, // localStorage.getItem returns null in test environment
+        token: 'test-token',
       },
     });
   });
@@ -79,7 +93,7 @@ describe('WebSocketContext', () => {
     expect(screen.getByTestId('connection-status')).toHaveTextContent('Disconnected');
 
     // Simulate connection
-    const connectHandler = mockSocket.on.mock.calls.find(call => call[0] === 'connect')[1];
+    const connectHandler = mockSocket.on.mock.calls.find((call: any) => call[0] === 'connect')[1];
     connectHandler();
 
     await waitFor(() => {
@@ -95,7 +109,7 @@ describe('WebSocketContext', () => {
     );
 
     // Simulate connection first
-    const connectHandler = mockSocket.on.mock.calls.find(call => call[0] === 'connect')[1];
+    const connectHandler = mockSocket.on.mock.calls.find((call: any) => call[0] === 'connect')[1];
     connectHandler();
 
     await waitFor(() => {
@@ -103,7 +117,7 @@ describe('WebSocketContext', () => {
     });
 
     // Simulate disconnection
-    const disconnectHandler = mockSocket.on.mock.calls.find(call => call[0] === 'disconnect')[1];
+    const disconnectHandler = mockSocket.on.mock.calls.find((call: any) => call[0] === 'disconnect')[1];
     disconnectHandler();
 
     await waitFor(() => {
@@ -121,7 +135,7 @@ describe('WebSocketContext', () => {
     );
 
     // Simulate connection error
-    const errorHandler = mockSocket.on.mock.calls.find(call => call[0] === 'connect_error')[1];
+    const errorHandler = mockSocket.on.mock.calls.find((call: any) => call[0] === 'connect_error')[1];
     const error = new Error('Connection failed');
     errorHandler(error);
 
@@ -188,9 +202,11 @@ describe('WebSocketContext', () => {
     process.env.REACT_APP_WS_URL = originalEnv;
   });
 
-  test('uses auth token from localStorage', () => {
-    const mockGetItem = jest.spyOn(Storage.prototype, 'getItem');
-    mockGetItem.mockReturnValue('test-token');
+  test('uses auth token from AuthService', () => {
+    const originalEnv = process.env.REACT_APP_WS_URL;
+    process.env.REACT_APP_WS_URL = 'http://localhost:8000';
+    
+    mockGetToken.mockReturnValue('custom-test-token');
 
     render(
       <WebSocketProvider>
@@ -198,14 +214,91 @@ describe('WebSocketContext', () => {
       </WebSocketProvider>
     );
 
+    expect(mockGetToken).toHaveBeenCalled();
     expect(mockIo).toHaveBeenCalledWith('http://localhost:8000', {
       transports: ['websocket'],
       auth: {
-        token: 'test-token',
+        token: 'custom-test-token',
       },
     });
 
-    mockGetItem.mockRestore();
+    process.env.REACT_APP_WS_URL = originalEnv;
+  });
+
+  test('does not connect when no token is available', () => {
+    mockGetToken.mockReturnValue(null);
+
+    render(
+      <WebSocketProvider>
+        <TestComponent />
+      </WebSocketProvider>
+    );
+
+    expect(mockGetToken).toHaveBeenCalled();
+    expect(mockIo).not.toHaveBeenCalled();
+    expect(screen.getByTestId('socket-exists')).toHaveTextContent('No socket');
+  });
+
+  test('handles authentication errors and redirects to login', async () => {
+    const originalLocation = window.location;
+    delete (window as any).location;
+    window.location = { ...originalLocation, href: '' } as Location;
+
+    render(
+      <WebSocketProvider>
+        <TestComponent />
+      </WebSocketProvider>
+    );
+
+    // Simulate authentication error
+    const errorHandler = mockSocket.on.mock.calls.find((call: any) => call[0] === 'connect_error')[1];
+    const error = new Error('Authentication failed');
+    errorHandler(error);
+
+    await waitFor(() => {
+      expect(mockRemoveToken).toHaveBeenCalled();
+      expect(window.location.href).toBe('/login');
+    });
+
+    window.location = originalLocation;
+  });
+
+  test('reconnects after login event', async () => {
+    const { rerender } = render(
+      <WebSocketProvider>
+        <TestComponent />
+      </WebSocketProvider>
+    );
+
+    // Clear initial calls
+    mockIo.mockClear();
+    mockSocket.close.mockClear();
+
+    // Simulate login event
+    window.dispatchEvent(new Event('auth:login'));
+
+    await waitFor(() => {
+      expect(mockSocket.close).toHaveBeenCalled();
+      expect(mockIo).toHaveBeenCalled();
+    });
+  });
+
+  test('disconnects after logout event', async () => {
+    render(
+      <WebSocketProvider>
+        <TestComponent />
+      </WebSocketProvider>
+    );
+
+    // Clear initial calls
+    mockSocket.close.mockClear();
+
+    // Simulate logout event
+    window.dispatchEvent(new Event('auth:logout'));
+
+    await waitFor(() => {
+      expect(mockSocket.close).toHaveBeenCalled();
+    });
   });
 
   test('throws error when useWebSocket is used outside provider', () => {

@@ -18,6 +18,7 @@ import {
 } from 'antd';
 import { InfoCircleOutlined, SaveOutlined, ReloadOutlined } from '@ant-design/icons';
 import apiService from '../services/api';
+import { logger } from '../utils/logger';
 import { OptimizationCriteria } from '../types';
 
 const { Option } = Select;
@@ -32,6 +33,7 @@ const Configuration: React.FC = () => {
 
   useEffect(() => {
     loadConfiguration();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadConfiguration = async () => {
@@ -42,7 +44,7 @@ const Configuration: React.FC = () => {
       form.setFieldsValue(config);
       setHasChanges(false);
     } catch (error) {
-      console.error('Failed to load configuration:', error);
+      logger.error('Failed to load configuration:', error);
       message.error('Failed to load configuration');
     } finally {
       setLoading(false);
@@ -57,7 +59,7 @@ const Configuration: React.FC = () => {
       setHasChanges(false);
       message.success('Configuration saved successfully');
     } catch (error) {
-      console.error('Failed to save configuration:', error);
+      logger.error('Failed to save configuration:', error);
       message.error('Failed to save configuration');
     } finally {
       setSaving(false);

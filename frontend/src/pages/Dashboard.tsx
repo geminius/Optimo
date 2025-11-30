@@ -5,6 +5,7 @@ import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined } from '@ant-desi
 import apiService from '../services/api';
 import { useWebSocket } from '../contexts/WebSocketContext';
 import { OptimizationSession, ProgressUpdate } from '../types';
+import { logger } from '../utils/logger';
 
 const Dashboard: React.FC = () => {
   const [stats, setStats] = useState({
@@ -58,7 +59,7 @@ const Dashboard: React.FC = () => {
       }));
       setPerformanceData(mockData);
     } catch (error) {
-      console.error('Failed to load dashboard data:', error);
+      logger.error('Failed to load dashboard data:', error);
       message.error('Failed to load dashboard data');
     } finally {
       setLoading(false);
@@ -91,7 +92,7 @@ const Dashboard: React.FC = () => {
       message.success(`Optimization ${action}d successfully`);
       loadDashboardData();
     } catch (error) {
-      console.error(`Failed to ${action} optimization:`, error);
+      logger.error(`Failed to ${action} optimization:`, error);
       message.error(`Failed to ${action} optimization`);
     }
   };
@@ -102,6 +103,7 @@ const Dashboard: React.FC = () => {
       dataIndex: 'id',
       key: 'id',
       render: (id: string) => id.substring(0, 8) + '...',
+      responsive: ['sm'] as any,
     },
     {
       title: 'Model',
@@ -137,10 +139,13 @@ const Dashboard: React.FC = () => {
           ))}
         </div>
       ),
+      responsive: ['md'] as any,
     },
     {
       title: 'Actions',
       key: 'actions',
+      fixed: 'right' as any,
+      width: 200,
       render: (_: any, record: OptimizationSession) => (
         <div>
           {record.status === 'running' && (
@@ -183,8 +188,8 @@ const Dashboard: React.FC = () => {
       <h1>Dashboard</h1>
       
       {/* Statistics Cards */}
-      <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col span={6}>
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        <Col xs={24} sm={12} md={12} lg={6}>
           <Card>
             <Statistic
               title="Total Models"
@@ -193,7 +198,7 @@ const Dashboard: React.FC = () => {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={24} sm={12} md={12} lg={6}>
           <Card>
             <Statistic
               title="Active Optimizations"
@@ -202,7 +207,7 @@ const Dashboard: React.FC = () => {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={24} sm={12} md={12} lg={6}>
           <Card>
             <Statistic
               title="Avg Size Reduction"
@@ -212,7 +217,7 @@ const Dashboard: React.FC = () => {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={24} sm={12} md={12} lg={6}>
           <Card>
             <Statistic
               title="Avg Speed Improvement"
@@ -225,8 +230,8 @@ const Dashboard: React.FC = () => {
       </Row>
 
       {/* Performance Chart */}
-      <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col span={24}>
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        <Col xs={24}>
           <Card title="Optimization Performance Trends">
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={performanceData}>
@@ -253,8 +258,8 @@ const Dashboard: React.FC = () => {
       </Row>
 
       {/* Active Optimizations Table */}
-      <Row>
-        <Col span={24}>
+      <Row gutter={[16, 16]}>
+        <Col xs={24}>
           <Card title="Active Optimizations">
             <Table
               columns={columns}
@@ -262,6 +267,7 @@ const Dashboard: React.FC = () => {
               rowKey="id"
               loading={loading}
               pagination={{ pageSize: 10 }}
+              scroll={{ x: 800 }}
             />
           </Card>
         </Col>

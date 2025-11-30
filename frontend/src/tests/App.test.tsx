@@ -1,7 +1,9 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
+import { message } from 'antd';
 import App from '../App';
+import apiService from '../services/api';
 
 // Mock the API service
 jest.mock('../services/api', () => ({
@@ -25,6 +27,29 @@ jest.mock('../contexts/WebSocketContext', () => ({
     unsubscribeFromProgress: jest.fn(),
   }),
 }));
+
+// Mock AuthService
+jest.mock('../services/auth', () => ({
+  __esModule: true,
+  default: {
+    getToken: jest.fn().mockReturnValue('mock-token'),
+    getUser: jest.fn().mockReturnValue({ id: '1', username: 'testuser', role: 'user' }),
+    isTokenValid: jest.fn().mockReturnValue(true),
+    getTimeUntilExpiration: jest.fn().mockReturnValue(3600000), // 1 hour
+    isTokenExpiringSoon: jest.fn().mockReturnValue(false),
+    login: jest.fn(),
+    logout: jest.fn(),
+    setToken: jest.fn(),
+    removeToken: jest.fn(),
+  },
+}));
+
+// Mock SessionTimeoutWarning component
+jest.mock('../components/auth/SessionTimeoutWarning', () => {
+  return function MockSessionTimeoutWarning() {
+    return null;
+  };
+});
 
 describe('App Component', () => {
   test('renders without crashing', () => {

@@ -433,9 +433,11 @@ async def get_metrics():
 
 # Authentication endpoints
 @app.post("/auth/login", tags=["Authentication"])
-async def login(credentials: dict):
+async def login(
+    credentials: dict,
+    auth_manager: AuthManager = Depends(get_auth_manager)
+):
     """Authenticate user and return access token."""
-    # Placeholder implementation - replace with actual authentication
     username = credentials.get("username")
     password = credentials.get("password")
     
@@ -445,24 +447,28 @@ async def login(credentials: dict):
             detail="Username and password required"
         )
     
-    # Simple validation (replace with proper authentication)
-    if username == "admin" and password == "admin":
-        token = str(uuid.uuid4())
-        return {
-            "access_token": token,
-            "token_type": "bearer",
-            "expires_in": 3600,
-            "user": {
-                "id": "admin",
-                "username": "admin",
-                "role": "administrator"
-            }
-        }
+    # Authenticate user with AuthManager
+    user = auth_manager.authenticate_user(username, password)
     
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid credentials"
-    )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials"
+        )
+    
+    # Create JWT token
+    token = auth_manager.create_access_token(user)
+    
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in": 3600,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "role": user.role
+        }
+    }
 
 
 # Model management endpoints

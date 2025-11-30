@@ -5,13 +5,23 @@ Welcome to the documentation for the Robotics Model Optimization Platform.
 ## Quick Links
 
 - [Main README](../README.md) - Project overview and setup
+- [Authentication Guide](AUTHENTICATION.md) - Complete authentication documentation
+- [API Authentication](API_AUTHENTICATION.md) - Quick API authentication reference
 - [Deployment Guide](../DEPLOYMENT.md) - Deployment instructions
 
 
 
 ### API Documentation
-- OpenAPI documentation available at `/docs` when running the API server
+- **OpenAPI/Swagger**: Available at `/docs` when running the API server
+- **Authentication Guide**: See [AUTHENTICATION.md](AUTHENTICATION.md) for detailed auth setup
 - Run `uvicorn src.api.main:app --reload` and visit `http://localhost:8000/docs`
+
+### Authentication
+All API endpoints (except `/auth/login` and `/health`) require JWT authentication. See [AUTHENTICATION.md](AUTHENTICATION.md) for:
+- Login and token management
+- API request authentication
+- WebSocket authentication
+- Troubleshooting common issues
 
 ## Project Structure
 
@@ -38,6 +48,14 @@ Welcome to the documentation for the Robotics Model Optimization Platform.
 ```
 
 ## Key Features
+
+### Authentication & Security
+- JWT-based authentication for all API endpoints
+- Protected routes in web interface
+- Secure WebSocket connections
+- Role-based access control
+- Session management with automatic expiration
+- See [AUTHENTICATION.md](AUTHENTICATION.md) for details
 
 ### Autonomous Optimization
 - Automatic model analysis and optimization
