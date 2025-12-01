@@ -1,37 +1,30 @@
 ---
 inclusion: always
 ---
----
-inclusion: always
----
 
 # Architecture & Code Structure
 
 ## Layered Architecture
 
-The codebase follows strict layer separation. Never bypass layers or create circular dependencies:
+Strict layer separation - never bypass layers or create circular dependencies:
 
-1. **Agent Layer** (`src/agents/`) - All agents inherit from `BaseOptimizationAgent` or `BaseAgent`
-2. **Service Layer** (`src/services/`) - Singleton managers (MemoryManager, OptimizationManager, NotificationService, MonitoringService)
-3. **Integration Layer** (`src/integration/`) - Dependency injection and component orchestration
-4. **API Layer** (`src/api/`) - FastAPI endpoints with async/await for all I/O operations
+1. **Agent Layer** (`src/agents/`) - Inherit from `BaseOptimizationAgent` or `BaseAgent`
+2. **Service Layer** (`src/services/`) - Singleton managers for orchestration
+3. **Integration Layer** (`src/integration/`) - Dependency injection and component wiring
+4. **API Layer** (`src/api/`) - FastAPI endpoints with async/await
 
-## Foundation Files (Always Check Before Creating Components)
+## Foundation Files - Check Before Creating New Components
 
-Before implementing new functionality, check these files for existing patterns:
-
-- `src/agents/base.py` - Base classes with progress emission and error handling
+- `src/agents/base.py` - Base agent classes with progress emission and error handling
 - `src/models/core.py` - Core data models (ModelData, OptimizationResult, OptimizationConfig)
 - `src/utils/exceptions.py` - Custom exceptions (OptimizationError, ValidationError, ResourceError)
 - `src/api/models.py` - Pydantic request/response schemas
+- `src/api/dependencies.py` - Dependency injection functions
 - `src/config/optimization_criteria.py` - Optimization configuration and constraints
 
-## Implementation Patterns
+## Backend Implementation Patterns
 
-### Creating a New Agent
-
-Must inherit from base class, implement async methods, and emit progress:
-
+### Agent Pattern
 ```python
 from src.agents.base import BaseOptimizationAgent
 from src.models.core import ModelData, OptimizationResult
@@ -44,10 +37,7 @@ class NewAgent(BaseOptimizationAgent):
         return result
 ```
 
-### Creating a New Service
-
-Use singleton pattern to ensure single instance:
-
+### Service Pattern (Singleton)
 ```python
 class NewService:
     _instance = None
@@ -55,14 +45,10 @@ class NewService:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            # Initialize once
         return cls._instance
 ```
 
-### Creating a New API Endpoint
-
-Use FastAPI dependency injection and typed models:
-
+### API Endpoint Pattern
 ```python
 from fastapi import APIRouter, Depends
 from src.api.dependencies import get_optimization_manager
@@ -78,54 +64,90 @@ async def endpoint(
     return await manager.process(request)
 ```
 
+## Frontend Structure
+
+- `frontend/src/components/` - Reusable UI components
+- `frontend/src/pages/` - Route-level page components
+- `frontend/src/services/api.ts` - Centralized API client (all backend calls go through this)
+- `frontend/src/services/auth.ts` - Authentication service
+- `frontend/src/types/` - TypeScript type definitions
+- `frontend/src/contexts/` - React context providers (AuthContext, WebSocketContext)
+- `frontend/src/hooks/` - Custom React hooks
+- `frontend/src/tests/` - Component tests with React Testing Library
+
+### Frontend Patterns
+
+- Functional components with hooks only (no class components)
+- All API calls through `src/services/api.ts`
+- Props and state must be explicitly typed
+- Use AuthContext for authentication state
+- Use WebSocketContext for real-time updates
+
 ## Naming Conventions
 
-- **Python files**: `snake_case.py`
-- **Python classes**: `PascalCase`
-- **Python functions/variables**: `snake_case`
-- **Python constants**: `UPPER_SNAKE_CASE`
-- **React components**: `PascalCase.tsx`
-- **React tests**: `ComponentName.test.tsx`
-- **Backend tests**: `test_module_name.py`
+**Python:**
+- Files: `snake_case.py`
+- Classes: `PascalCase`
+- Functions/variables: `snake_case`
+- Constants: `UPPER_SNAKE_CASE`
+
+**TypeScript/React:**
+- Components: `PascalCase.tsx`
+- Hooks: `useCamelCase.ts`
+- Utilities: `camelCase.ts`
+- Types: `PascalCase` interfaces/types
+
+**Tests:**
+- Backend: `test_module_name.py`
+- Frontend: `ComponentName.test.tsx`
 
 ## Import Order
 
-Follow isort conventions (enforced by tooling):
+Follow isort conventions (enforced):
 
 1. Standard library imports
 2. Third-party package imports
-3. Local application imports (relative)
+3. Local application imports
 
 ## Error Handling
 
-- Use custom exceptions from `src/utils/exceptions.py` - never raise generic Exception
+- Use custom exceptions from `src/utils/exceptions.py` - never raise generic `Exception`
 - Apply retry decorators from `src/utils/retry.py` for transient failures
-- Implement recovery strategies from `src/utils/recovery.py` for rollback capability
-- Use structured logging with context: `logger.info("message", extra={"component": "ComponentName", "model_id": model_id})`
+- Implement recovery strategies from `src/utils/recovery.py` for rollback
+- Use structured logging: `logger.info("msg", extra={"component": "Name", "context": value})`
 
 ## Testing Structure
 
-- **Backend tests**: Mirror `src/` structure in `tests/` directory
+**Backend:**
+- Mirror `src/` structure in `tests/` directory
 - Use shared fixtures from `tests/conftest.py`
-- Test files must start with `test_` prefix
-- Integration tests go in `tests/integration/`
-- Performance tests go in `tests/performance/`
+- Prefix test files with `test_`
+- Integration tests: `tests/integration/`
+- Performance tests: `tests/performance/`
 
-## Frontend Structure
-
-- `src/components/` - Reusable UI components
-- `src/pages/` - Route-level page components
-- `src/services/api.ts` - Centralized API client (all backend calls go through this)
-- `src/types/index.ts` - TypeScript type definitions
-- `src/contexts/` - React context providers (WebSocket, state management)
-- `src/tests/` - Component tests with React Testing Library
+**Frontend:**
+- Colocate tests in `frontend/src/tests/`
+- Use React Testing Library
+- Mock API calls via `jest.mock()`
+- Test user interactions, not implementation details
 
 ## Critical Rules
 
-- All async operations MUST use async/await syntax
-- All agents MUST emit progress events via `self.emit_progress()`
+**Backend:**
+- All I/O operations MUST use async/await
+- All agents MUST emit progress via `self.emit_progress()`
 - All services MUST use singleton pattern
 - All API endpoints MUST use dependency injection
-- All functions MUST have type hints (Python) or TypeScript types
-- Never hardcode paths - use configuration or environment variables
-- Never commit sensitive data - use environment variables
+- All functions MUST have type hints
+
+**Frontend:**
+- All components MUST be functional with hooks
+- All API calls MUST go through `services/api.ts`
+- All props and state MUST be explicitly typed
+- Use contexts for global state (auth, websocket)
+
+**General:**
+- Never hardcode paths - use config or environment variables
+- Never commit sensitive data - use `.env` files
+- Never bypass layer architecture
+- Always check foundation files before creating new patterns

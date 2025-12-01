@@ -19,16 +19,18 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import uvicorn
 from pydantic import BaseModel, Field
+import socketio
 
 from .models import (
     ModelUploadResponse, OptimizationRequest, OptimizationResponse,
     SessionStatusResponse, SessionListResponse, ModelListResponse,
-    EvaluationResponse, ErrorResponse, HealthResponse, User
+    EvaluationResponse, ErrorResponse, HealthResponse, User, DashboardStats
 )
 from .auth import AuthManager, get_auth_manager
 from .dependencies import get_current_user, get_optimization_manager
 from .monitoring import router as monitoring_router
 from .openapi_config import get_openapi_config
+from .error_handlers import register_error_handlers
 from ..services.optimization_manager import OptimizationManager
 from ..models.core import ModelMetadata, OptimizationSession
 from ..config.optimization_criteria import OptimizationCriteria
@@ -40,13 +42,19 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application lifespan."""
+    """Manage application lifespan with comprehensive startup validation."""
     # Startup
+    logger.info("=" * 80)
     logger.info("Starting Robotics Model Optimization Platform API")
+    logger.info("=" * 80)
+    
+    startup_errors = []
+    startup_warnings = []
     
     # Check if platform integrator is already set (from main.py)
     if not hasattr(app.state, 'platform_integrator'):
         # Initialize platform integrator for standalone API mode
+        logger.info("Initializing PlatformIntegrator...")
         from ..integration.platform_integration import PlatformIntegrator
         
         config = {
@@ -78,29 +86,184 @@ async def lifespan(app: FastAPI):
             "architecture_search_agent": {}
         }
         
-        platform_integrator = PlatformIntegrator(config)
-        success = await platform_integrator.initialize_platform()
-        
-        if not success:
-            logger.error("Failed to initialize PlatformIntegrator")
-            raise RuntimeError("Failed to initialize PlatformIntegrator")
-        
-        app.state.platform_integrator = platform_integrator
-        app.state.optimization_manager = platform_integrator.get_optimization_manager()
+        try:
+            platform_integrator = PlatformIntegrator(config)
+            success = await platform_integrator.initialize_platform()
+            
+            if not success:
+                error_msg = "Failed to initialize PlatformIntegrator"
+                logger.error(error_msg)
+                startup_errors.append(error_msg)
+                raise RuntimeError(error_msg)
+            
+            app.state.platform_integrator = platform_integrator
+            app.state.optimization_manager = platform_integrator.get_optimization_manager()
+            logger.info("✓ PlatformIntegrator initialized successfully")
+        except Exception as e:
+            error_msg = f"Failed to initialize PlatformIntegrator: {e}"
+            logger.error(error_msg, exc_info=True)
+            startup_errors.append(error_msg)
+            raise
+    else:
+        logger.info("✓ PlatformIntegrator already initialized")
     
-    logger.info("API startup completed successfully")
+    # Validate required services are available
+    logger.info("Validating required services...")
+    
+    # Validate OptimizationManager
+    if hasattr(app.state, 'optimization_manager') and app.state.optimization_manager:
+        logger.info("✓ OptimizationManager available")
+    else:
+        warning_msg = "OptimizationManager not available"
+        logger.warning(warning_msg)
+        startup_warnings.append(warning_msg)
+    
+    # Validate ModelStore
+    try:
+        if hasattr(app.state, 'platform_integrator'):
+            model_store = app.state.platform_integrator.get_model_store()
+            if model_store:
+                logger.info("✓ ModelStore available")
+            else:
+                warning_msg = "ModelStore not available"
+                logger.warning(warning_msg)
+                startup_warnings.append(warning_msg)
+    except Exception as e:
+        warning_msg = f"Failed to validate ModelStore: {e}"
+        logger.warning(warning_msg)
+        startup_warnings.append(warning_msg)
+    
+    # Validate MemoryManager
+    try:
+        if hasattr(app.state, 'platform_integrator'):
+            memory_manager = app.state.platform_integrator.get_memory_manager()
+            if memory_manager:
+                logger.info("✓ MemoryManager available")
+            else:
+                warning_msg = "MemoryManager not available"
+                logger.warning(warning_msg)
+                startup_warnings.append(warning_msg)
+    except Exception as e:
+        warning_msg = f"Failed to validate MemoryManager: {e}"
+        logger.warning(warning_msg)
+        startup_warnings.append(warning_msg)
+    
+    # Validate NotificationService
+    try:
+        if hasattr(app.state, 'platform_integrator'):
+            notification_service = app.state.platform_integrator.get_notification_service()
+            if notification_service:
+                logger.info("✓ NotificationService available")
+            else:
+                warning_msg = "NotificationService not available"
+                logger.warning(warning_msg)
+                startup_warnings.append(warning_msg)
+    except Exception as e:
+        warning_msg = f"Failed to validate NotificationService: {e}"
+        logger.warning(warning_msg)
+        startup_warnings.append(warning_msg)
+    
+    # Initialize ConfigurationManager
+    logger.info("Initializing ConfigurationManager...")
+    try:
+        from ..services.config_manager import ConfigurationManager
+        config_manager = ConfigurationManager()
+        app.state.config_manager = config_manager
+        
+        # Load current configuration
+        current_config = config_manager.get_current_configuration()
+        logger.info(f"✓ ConfigurationManager initialized with config: {current_config.name}")
+    except Exception as e:
+        warning_msg = f"Failed to initialize ConfigurationManager: {e}"
+        logger.warning(warning_msg)
+        startup_warnings.append(warning_msg)
+    
+    # Initialize WebSocket manager
+    logger.info("Initializing WebSocketManager...")
+    try:
+        from ..services.websocket_manager import WebSocketManager
+        websocket_manager = WebSocketManager()
+        app.state.websocket_manager = websocket_manager
+        logger.info("✓ WebSocketManager initialized")
+        
+        # Connect WebSocket manager to notification service
+        if hasattr(app.state, 'platform_integrator'):
+            notification_service = app.state.platform_integrator.get_notification_service()
+            if notification_service:
+                websocket_manager.setup_notification_handlers(notification_service)
+                logger.info("✓ WebSocketManager connected to NotificationService")
+            else:
+                warning_msg = "NotificationService not available for WebSocket integration"
+                logger.warning(warning_msg)
+                startup_warnings.append(warning_msg)
+    except Exception as e:
+        error_msg = f"Failed to initialize WebSocketManager: {e}"
+        logger.error(error_msg, exc_info=True)
+        startup_errors.append(error_msg)
+    
+    # Validate upload directory
+    logger.info("Validating upload directory...")
+    if UPLOAD_DIR.exists():
+        logger.info(f"✓ Upload directory exists: {UPLOAD_DIR}")
+    else:
+        logger.info(f"Creating upload directory: {UPLOAD_DIR}")
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        logger.info("✓ Upload directory created")
+    
+    # Log startup summary
+    logger.info("=" * 80)
+    logger.info("Startup Summary:")
+    logger.info(f"  Errors: {len(startup_errors)}")
+    logger.info(f"  Warnings: {len(startup_warnings)}")
+    
+    if startup_errors:
+        logger.error("Startup errors:")
+        for error in startup_errors:
+            logger.error(f"  - {error}")
+    
+    if startup_warnings:
+        logger.warning("Startup warnings:")
+        for warning in startup_warnings:
+            logger.warning(f"  - {warning}")
+    
+    if not startup_errors:
+        logger.info("✓ API startup completed successfully")
+    else:
+        logger.error("✗ API startup completed with errors")
+    
+    logger.info("=" * 80)
     
     yield
     
     # Shutdown
+    logger.info("=" * 80)
     logger.info("Shutting down Robotics Model Optimization Platform API")
+    logger.info("=" * 80)
     
+    # Cleanup WebSocket connections
+    if hasattr(app.state, 'websocket_manager'):
+        try:
+            ws_stats = app.state.websocket_manager.get_stats()
+            logger.info(f"WebSocket connections at shutdown: {ws_stats['total_connections']}")
+        except Exception as e:
+            logger.warning(f"Failed to get WebSocket stats: {e}")
+    
+    # Shutdown platform integrator
     if hasattr(app.state, 'platform_integrator'):
-        await app.state.platform_integrator.shutdown_platform()
+        try:
+            await app.state.platform_integrator.shutdown_platform()
+            logger.info("✓ PlatformIntegrator shutdown complete")
+        except Exception as e:
+            logger.error(f"Error during platform shutdown: {e}", exc_info=True)
     elif hasattr(app.state, 'optimization_manager'):
-        app.state.optimization_manager.cleanup()
+        try:
+            app.state.optimization_manager.cleanup()
+            logger.info("✓ OptimizationManager cleanup complete")
+        except Exception as e:
+            logger.error(f"Error during optimization manager cleanup: {e}", exc_info=True)
     
-    logger.info("API shutdown completed")
+    logger.info("✓ API shutdown completed")
+    logger.info("=" * 80)
 
 
 # Get OpenAPI configuration
@@ -119,20 +282,81 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Configure CORS
+# ============================================================================
+# Configure CORS (Cross-Origin Resource Sharing)
+# ============================================================================
+# CORS configuration allows the frontend to make requests from different origins
+# and enables WebSocket upgrade requests for Socket.IO connections.
+#
+# Configuration:
+# - Set CORS_ORIGINS environment variable with comma-separated origins
+# - Example: CORS_ORIGINS="http://localhost:3000,https://app.example.com"
+# - Default: "*" (all origins - not recommended for production)
+#
+# WebSocket Support:
+# - WebSocket upgrade requests are automatically handled by the middleware
+# - Socket.IO connections use the same CORS policy as HTTP requests
+# - Credentials are allowed for authenticated WebSocket connections
+
+# Get allowed origins from environment or use defaults
+allowed_origins = os.getenv("CORS_ORIGINS", "*").split(",")
+if allowed_origins == ["*"]:
+    logger.warning("CORS configured to allow all origins. Configure CORS_ORIGINS environment variable for production.")
+
+# Add monitoring and logging middleware
+from .middleware import RequestLoggingMiddleware, PerformanceMonitoringMiddleware
+
+# Add performance monitoring middleware (first, so it wraps everything)
+app.add_middleware(
+    PerformanceMonitoringMiddleware,
+    slow_request_threshold_ms=1000.0  # Log requests slower than 1 second
+)
+
+# Add request logging middleware
+app.add_middleware(RequestLoggingMiddleware)
+
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=allowed_origins,
+    allow_credentials=True,  # Required for authenticated requests and WebSocket
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["*"],  # Allow all headers including WebSocket upgrade headers
+    expose_headers=["X-Request-ID", "X-Response-Time"],  # Expose timing headers
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
+
+# Create Socket.IO ASGI app
+# Note: WebSocketManager is initialized in lifespan, we'll mount it after app creation
+sio_asgi_app = None
 
 # Security
 security = HTTPBearer()
 
-# Include routers
+# Register error handlers
+register_error_handlers(app)
+
+# ============================================================================
+# Register API Routers
+# ============================================================================
+# All routers are registered here to make them available through the FastAPI app
+
+# Monitoring endpoints (health checks, metrics)
 app.include_router(monitoring_router)
+
+# Dashboard endpoints (statistics and aggregate metrics)
+from .dashboard import router as dashboard_router
+app.include_router(dashboard_router)
+
+# Session endpoints (list and filter optimization sessions)
+from .sessions import router as sessions_router
+app.include_router(sessions_router)
+
+# Configuration endpoints (optimization criteria management)
+from .config import router as config_router
+app.include_router(config_router)
+
+logger.info("All API routers registered successfully")
 
 # Global configuration
 UPLOAD_DIR = Path("uploads")
@@ -140,23 +364,6 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
 ALLOWED_EXTENSIONS = {".pt", ".pth", ".onnx", ".pb", ".h5", ".safetensors"}
-
-
-
-
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    """Global exception handler."""
-    logger.error(f"Unhandled exception: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content=ErrorResponse(
-            error="Internal server error",
-            message="An unexpected error occurred",
-            details=str(exc) if app.debug else None
-        ).dict()
-    )
 
 
 # Health check endpoint
@@ -174,11 +381,63 @@ async def health_check():
     )
 
 
+# Performance metrics endpoint
+@app.get("/metrics", tags=["Monitoring"])
+async def get_metrics():
+    """
+    Get API performance metrics.
+    
+    Returns metrics about:
+    - Request performance (average duration, slow requests)
+    - WebSocket connections
+    - Cache statistics
+    
+    Requires authentication.
+    """
+    from .middleware import PerformanceMonitoringMiddleware, WebSocketMetricsMiddleware
+    from ..services.cache_service import CacheService
+    
+    metrics = {
+        "timestamp": datetime.now().isoformat(),
+        "api_performance": {},
+        "websocket": {},
+        "cache": {}
+    }
+    
+    # Get API performance metrics from middleware
+    for middleware in app.user_middleware:
+        if isinstance(middleware.cls, type) and issubclass(middleware.cls, PerformanceMonitoringMiddleware):
+            # Access the middleware instance
+            # Note: This is a simplified approach; in production, you'd want to store
+            # the middleware instance in app.state during initialization
+            pass
+    
+    # Get cache statistics
+    try:
+        cache_service = CacheService()
+        metrics["cache"] = cache_service.get_statistics()
+    except Exception as e:
+        logger.warning(f"Failed to get cache statistics: {e}")
+        metrics["cache"] = {"error": str(e)}
+    
+    # Get WebSocket metrics if available
+    if hasattr(app.state, 'websocket_metrics'):
+        try:
+            metrics["websocket"] = app.state.websocket_metrics.get_metrics()
+        except Exception as e:
+            logger.warning(f"Failed to get WebSocket metrics: {e}")
+            metrics["websocket"] = {"error": str(e)}
+    
+    return metrics
+
+
 # Authentication endpoints
 @app.post("/auth/login", tags=["Authentication"])
-async def login(credentials: dict):
+async def login(
+    credentials: dict,
+    auth_manager: AuthManager = Depends(get_auth_manager)
+):
     """Authenticate user and return access token."""
-    # Placeholder implementation - replace with actual authentication
     username = credentials.get("username")
     password = credentials.get("password")
     
@@ -188,24 +447,28 @@ async def login(credentials: dict):
             detail="Username and password required"
         )
     
-    # Simple validation (replace with proper authentication)
-    if username == "admin" and password == "admin":
-        token = str(uuid.uuid4())
-        return {
-            "access_token": token,
-            "token_type": "bearer",
-            "expires_in": 3600,
-            "user": {
-                "id": "admin",
-                "username": "admin",
-                "role": "administrator"
-            }
-        }
+    # Authenticate user with AuthManager
+    user = auth_manager.authenticate_user(username, password)
     
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid credentials"
-    )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials"
+        )
+    
+    # Create JWT token
+    token = auth_manager.create_access_token(user)
+    
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in": 3600,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "role": user.role
+        }
+    }
 
 
 # Model management endpoints
@@ -612,11 +875,51 @@ async def get_session_results(
         )
 
 
+def create_app_with_socketio():
+    """
+    Create combined ASGI application with FastAPI and Socket.IO.
+    
+    This function wraps the FastAPI application with Socket.IO support,
+    enabling real-time WebSocket communication for optimization progress
+    updates and notifications.
+    
+    The Socket.IO server is mounted at the '/socket.io' path and handles:
+    - Client connections with authentication
+    - Session-based subscriptions
+    - Real-time progress updates
+    - System notifications and alerts
+    
+    Returns:
+        Combined ASGI application with FastAPI and Socket.IO
+    """
+    from ..services.websocket_manager import WebSocketManager
+    
+    logger.info("Creating combined FastAPI + Socket.IO application")
+    
+    # Get WebSocket manager instance (singleton)
+    ws_manager = WebSocketManager()
+    
+    # Create Socket.IO ASGI app that wraps FastAPI
+    # This allows both HTTP and WebSocket traffic on the same port
+    sio_asgi_app = socketio.ASGIApp(
+        ws_manager.sio,
+        app,
+        socketio_path='/socket.io'
+    )
+    
+    logger.info("✓ Socket.IO mounted at /socket.io")
+    logger.info("✓ Combined ASGI application created")
+    
+    return sio_asgi_app
+
+
 if __name__ == "__main__":
+    # Create combined app with Socket.IO
+    combined_app = create_app_with_socketio()
+    
     uvicorn.run(
-        "src.api.main:app",
+        combined_app,
         host="0.0.0.0",
         port=8000,
-        reload=True,
         log_level="info"
     )

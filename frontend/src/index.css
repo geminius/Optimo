@@ -19,6 +19,7 @@ code {
 
 .ant-layout-sider {
   box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
+  z-index: 100;
 }
 
 .site-layout {
@@ -293,4 +294,335 @@ code {
 .empty-state-description {
   font-size: 14px;
   color: #999;
+}
+
+/* ============================================
+   RESPONSIVE DESIGN - MOBILE & TABLET
+   ============================================ */
+
+/* Tablet and below (max-width: 992px) */
+@media (max-width: 992px) {
+  /* Adjust layout for tablets */
+  .site-layout {
+    margin-left: 0;
+  }
+
+  /* Make sidebar collapsible on tablets */
+  .ant-layout-sider {
+    position: fixed !important;
+    left: -200px;
+    height: 100vh;
+    transition: left 0.3s ease;
+  }
+
+  .ant-layout-sider.ant-layout-sider-collapsed {
+    left: 0;
+  }
+
+  /* Adjust header for smaller screens */
+  .site-layout-background {
+    padding: 0 16px;
+  }
+
+  /* Stack statistics cards vertically on tablets */
+  .ant-col-6 {
+    width: 50% !important;
+    margin-bottom: 16px;
+  }
+
+  /* Adjust chart containers */
+  .chart-container {
+    padding: 12px;
+  }
+
+  /* Make tables scrollable horizontally */
+  .ant-table-wrapper {
+    overflow-x: auto;
+  }
+
+  /* Adjust card padding */
+  .ant-card-body {
+    padding: 16px;
+  }
+
+  /* Responsive grid for results comparison */
+  .results-comparison {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}
+
+/* Mobile devices (max-width: 768px) */
+@media (max-width: 768px) {
+  /* Full width layout on mobile */
+  .site-layout {
+    margin-left: 0;
+  }
+
+  /* Hide sidebar by default on mobile */
+  .ant-layout-sider {
+    position: fixed !important;
+    left: -200px;
+    z-index: 1000;
+  }
+
+  /* Adjust content padding for mobile */
+  .ant-layout-content {
+    margin: 16px 8px !important;
+    padding: 16px !important;
+  }
+
+  /* Stack all statistic cards vertically */
+  .ant-col-6,
+  .ant-col-8,
+  .ant-col-12 {
+    width: 100% !important;
+    margin-bottom: 12px;
+  }
+
+  /* Adjust page titles */
+  h1 {
+    font-size: 24px !important;
+    margin-bottom: 16px !important;
+  }
+
+  h2 {
+    font-size: 20px !important;
+  }
+
+  /* Adjust header layout for mobile */
+  .site-layout-background {
+    flex-direction: column;
+    align-items: flex-start !important;
+    padding: 12px 16px !important;
+    height: auto !important;
+  }
+
+  .site-layout-background > div:first-child {
+    font-size: 16px !important;
+    margin-bottom: 8px;
+  }
+
+  .site-layout-background > div:last-child {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  /* Adjust form layouts */
+  .ant-form-item-label {
+    padding-bottom: 4px;
+  }
+
+  /* Make buttons full width on mobile */
+  .ant-btn-block {
+    width: 100%;
+  }
+
+  /* Adjust upload area */
+  .upload-area,
+  .ant-upload-drag {
+    padding: 24px 16px !important;
+  }
+
+  /* Adjust table for mobile */
+  .ant-table {
+    font-size: 13px;
+  }
+
+  .ant-table-thead > tr > th,
+  .ant-table-tbody > tr > td {
+    padding: 8px 4px !important;
+  }
+
+  /* Hide less important table columns on mobile */
+  .ant-table-cell:nth-child(n+4) {
+    display: none;
+  }
+
+  /* Adjust progress cards */
+  .progress-card {
+    margin-bottom: 12px;
+  }
+
+  /* Adjust metric cards */
+  .metric-card {
+    padding: 12px;
+  }
+
+  .metric-value {
+    font-size: 20px;
+  }
+
+  /* Adjust filter section */
+  .filter-section {
+    padding: 12px;
+  }
+
+  /* Adjust page header */
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  /* Adjust connection status position */
+  .connection-status {
+    position: static;
+    margin-bottom: 8px;
+  }
+
+  /* Adjust model cards */
+  .model-card {
+    margin-bottom: 12px;
+  }
+
+  /* Adjust tags */
+  .technique-tag,
+  .ant-tag {
+    font-size: 11px;
+    padding: 0 6px;
+    margin: 2px;
+  }
+
+  /* Adjust space components */
+  .ant-space {
+    flex-wrap: wrap;
+  }
+
+  /* Adjust dividers */
+  .ant-divider {
+    margin: 16px 0;
+  }
+}
+
+/* Small mobile devices (max-width: 480px) */
+@media (max-width: 480px) {
+  /* Further reduce padding on small screens */
+  .ant-layout-content {
+    margin: 12px 4px !important;
+    padding: 12px !important;
+  }
+
+  /* Reduce card padding */
+  .ant-card-body {
+    padding: 12px;
+  }
+
+  /* Smaller page titles */
+  h1 {
+    font-size: 20px !important;
+  }
+
+  h2 {
+    font-size: 18px !important;
+  }
+
+  /* Adjust statistic cards */
+  .ant-statistic-title {
+    font-size: 13px;
+  }
+
+  .ant-statistic-content {
+    font-size: 20px;
+  }
+
+  /* Smaller buttons */
+  .ant-btn {
+    font-size: 13px;
+    padding: 4px 12px;
+    height: auto;
+  }
+
+  .ant-btn-lg {
+    font-size: 14px;
+    padding: 6px 14px;
+  }
+
+  /* Adjust form inputs */
+  .ant-input,
+  .ant-select,
+  .ant-input-number {
+    font-size: 14px;
+  }
+
+  /* Smaller progress bars */
+  .ant-progress {
+    font-size: 12px;
+  }
+
+  /* Adjust empty states */
+  .empty-state {
+    padding: 32px 16px;
+  }
+
+  .empty-state-icon {
+    font-size: 36px;
+  }
+
+  .empty-state-title {
+    font-size: 14px;
+  }
+
+  /* Adjust chart containers */
+  .chart-container {
+    padding: 8px;
+  }
+
+  /* Hide table actions on very small screens */
+  .ant-table-cell:last-child {
+    min-width: 80px;
+  }
+
+  /* Adjust dropdown menus */
+  .ant-dropdown-menu {
+    min-width: 140px;
+  }
+
+  /* Adjust modal sizes */
+  .ant-modal {
+    max-width: calc(100vw - 32px);
+    margin: 16px auto;
+  }
+
+  /* Adjust drawer sizes */
+  .ant-drawer-content-wrapper {
+    width: 100% !important;
+  }
+}
+
+/* Landscape orientation adjustments for mobile */
+@media (max-width: 768px) and (orientation: landscape) {
+  .ant-layout-content {
+    margin: 12px !important;
+    padding: 12px !important;
+  }
+
+  /* Adjust header height in landscape */
+  .site-layout-background {
+    padding: 8px 16px !important;
+  }
+}
+
+/* Print styles */
+@media print {
+  .ant-layout-sider,
+  .site-layout-background,
+  .ant-btn,
+  .connection-status {
+    display: none !important;
+  }
+
+  .site-layout {
+    margin-left: 0 !important;
+  }
+
+  .ant-layout-content {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .ant-card {
+    box-shadow: none !important;
+    border: 1px solid #d9d9d9 !important;
+  }
 }

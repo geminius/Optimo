@@ -6,6 +6,8 @@ import {
   AnalysisReport,
   EvaluationReport
 } from '../types';
+import AuthService from './auth';
+import ErrorHandler, { ERROR_MESSAGES } from '../utils/errorHandler';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
@@ -16,14 +18,84 @@ const api = axios.create({
   },
 });
 
-// Add request interceptor for authentication
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('auth_token');
-  if (token && config.headers) {
-    config.headers.Authorization = `Bearer ${token}`;
+// Request interceptor to add authentication token
+api.interceptors.request.use(
+  (config) => {
+    // Get token from AuthService
+    const token = AuthService.getToken();
+    
+    // Add Authorization header if token exists
+    if (token && config.headers) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
   }
-  return config;
-});
+);
+
+// Response interceptor to handle authentication errors
+api.interceptors.response.use(
+  (response) => {
+    // Pass through successful responses
+    return response;
+  },
+  (error) => {
+    if (axios.isAxiosError(error)) {
+      // Handle 401 Unauthorized - token expired or invalid
+      if (error.response?.status === 401) {
+        // Clear token and redirect to login
+        AuthService.removeToken();
+        
+        // Show error message using ErrorHandler
+        ErrorHandler.showError({
+          type: ErrorHandler.parseError(error).type,
+          message: ERROR_MESSAGES.AUTH_TOKEN_EXPIRED,
+          statusCode: 401,
+          originalError: error,
+        });
+        
+        // Redirect to login page
+        window.location.href = '/login';
+      }
+      
+      // Handle 403 Forbidden - insufficient permissions
+      else if (error.response?.status === 403) {
+        // Display permission denied message (do not redirect)
+        ErrorHandler.showError({
+          type: ErrorHandler.parseError(error).type,
+          message: ERROR_MESSAGES.AUTH_INSUFFICIENT_PERMISSIONS,
+          statusCode: 403,
+          originalError: error,
+        });
+      }
+      
+      // Handle other errors with appropriate messages
+      else if (error.response?.status && error.response.status >= 500) {
+        // Server errors
+        ErrorHandler.showError({
+          type: ErrorHandler.parseError(error).type,
+          message: ERROR_MESSAGES.SERVER_ERROR,
+          statusCode: error.response.status,
+          originalError: error,
+        });
+      }
+      
+      // Handle network errors
+      else if (!error.response) {
+        ErrorHandler.showError({
+          type: ErrorHandler.parseError(error).type,
+          message: ERROR_MESSAGES.NETWORK_CONNECTION_FAILED,
+          originalError: error,
+        });
+      }
+    }
+    
+    return Promise.reject(error);
+  }
+);
 
 export const apiService = {
   // Model management

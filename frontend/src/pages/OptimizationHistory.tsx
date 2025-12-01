@@ -26,7 +26,8 @@ import {
 } from '@ant-design/icons';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import apiService from '../services/api';
-import { OptimizationSession, OptimizationResults } from '../types';
+import { OptimizationSession } from '../types';
+import { logger } from '../utils/logger';
 
 const { Search } = Input;
 const { Option } = Select;
@@ -51,6 +52,7 @@ const OptimizationHistory: React.FC = () => {
 
   useEffect(() => {
     applyFilters();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessions, filters]);
 
   const loadOptimizationHistory = async () => {
@@ -59,7 +61,7 @@ const OptimizationHistory: React.FC = () => {
       const data = await apiService.getOptimizationSessions();
       setSessions(data);
     } catch (error) {
-      console.error('Failed to load optimization history:', error);
+      logger.error('Failed to load optimization history:', error);
       message.error('Failed to load optimization history');
     } finally {
       setLoading(false);
@@ -113,7 +115,7 @@ const OptimizationHistory: React.FC = () => {
       message.success('Session deleted successfully');
       loadOptimizationHistory();
     } catch (error) {
-      console.error('Failed to delete session:', error);
+      logger.error('Failed to delete session:', error);
       message.error('Failed to delete session');
     }
   };

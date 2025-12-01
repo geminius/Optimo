@@ -14,21 +14,44 @@ global.IntersectionObserver = jest.fn().mockImplementation(() => ({
   disconnect: jest.fn(),
 }));
 
-// Mock matchMedia
-const mockMatchMedia = jest.fn().mockImplementation(query => ({
-  matches: false,
-  media: query,
-  onchange: null,
-  addListener: jest.fn(), // deprecated
-  removeListener: jest.fn(), // deprecated
-  addEventListener: jest.fn(),
-  removeEventListener: jest.fn(),
-  dispatchEvent: jest.fn(),
-}));
-
+// Mock matchMedia - required for Ant Design responsive components
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
-  value: mockMatchMedia,
+  configurable: true,
+  value: jest.fn().mockImplementation(query => {
+    const listeners: Array<(e: any) => void> = [];
+    return {
+      matches: query === '(min-width: 768px)', // Default to desktop
+      media: query,
+      onchange: null,
+      addListener: jest.fn((listener: (e: any) => void) => {
+        listeners.push(listener);
+      }), // deprecated but still used by some libraries
+      removeListener: jest.fn((listener: (e: any) => void) => {
+        const index = listeners.indexOf(listener);
+        if (index > -1) {
+          listeners.splice(index, 1);
+        }
+      }), // deprecated
+      addEventListener: jest.fn((event: string, listener: (e: any) => void) => {
+        if (event === 'change') {
+          listeners.push(listener);
+        }
+      }),
+      removeEventListener: jest.fn((event: string, listener: (e: any) => void) => {
+        if (event === 'change') {
+          const index = listeners.indexOf(listener);
+          if (index > -1) {
+            listeners.splice(index, 1);
+          }
+        }
+      }),
+      dispatchEvent: jest.fn((event: Event) => {
+        listeners.forEach(listener => listener(event));
+        return true;
+      }),
+    };
+  }),
 });
 
 // Mock window.screen for responsive observer

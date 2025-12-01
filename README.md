@@ -162,6 +162,44 @@ npm install
 npm start
 ```
 
+### Authentication Setup
+
+The platform uses JWT-based authentication for secure API access.
+
+#### Default Credentials
+For development and testing:
+- **Username**: `admin`
+- **Password**: `admin123`
+
+#### Environment Variables
+Configure authentication in your `.env` file or environment:
+
+```bash
+# Backend API URL (required for frontend)
+REACT_APP_API_URL=http://localhost:8000
+
+# WebSocket URL (required for real-time updates)
+REACT_APP_WS_URL=http://localhost:8000
+
+# JWT Secret (backend - change in production!)
+JWT_SECRET_KEY=your-secret-key-here
+JWT_ALGORITHM=HS256
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=60
+```
+
+#### First-Time Login
+1. Start both backend and frontend servers
+2. Navigate to `http://localhost:3000`
+3. You'll be redirected to the login page
+4. Enter credentials (default: admin/admin123)
+5. Upon successful login, you'll be redirected to the dashboard
+
+#### Token Management
+- Tokens are stored in browser localStorage
+- Tokens expire after 60 minutes by default
+- You'll be automatically logged out when tokens expire
+- Use "Remember Me" to persist sessions across browser restarts
+
 ### Basic Usage
 
 #### Programmatic API
@@ -206,16 +244,40 @@ await platform.stop()
 ```
 
 #### REST API
+
+First, obtain an authentication token:
+
+```bash
+# Login to get access token
+curl -X POST "http://localhost:8000/auth/login" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=admin&password=admin123"
+
+# Response:
+# {
+#   "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+#   "token_type": "bearer",
+#   "expires_in": 3600,
+#   "user": {
+#     "id": "user-uuid",
+#     "username": "admin",
+#     "role": "admin"
+#   }
+# }
+```
+
+Then use the token for authenticated requests:
+
 ```bash
 # Upload a model
 curl -X POST "http://localhost:8000/models/upload" \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer <your-token-here>" \
   -F "file=@model.pth" \
   -F "name=MyRoboticsModel"
 
 # Start optimization
 curl -X POST "http://localhost:8000/optimize" \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer <your-token-here>" \
   -H "Content-Type: application/json" \
   -d '{
     "model_id": "model-uuid",
@@ -226,14 +288,26 @@ curl -X POST "http://localhost:8000/optimize" \
 
 # Check optimization status
 curl "http://localhost:8000/sessions/{session_id}/status" \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer <your-token-here>"
 
 # Get results
 curl "http://localhost:8000/sessions/{session_id}/results" \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer <your-token-here>"
 ```
 
 ## ⚙️ Configuration
+
+### Environment Variables
+
+See [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md) for complete environment variable reference.
+
+**Quick Setup**:
+1. Copy `.env.example` to `.env` in project root
+2. Copy `frontend/.env.example` to `frontend/.env`
+3. Update `JWT_SECRET_KEY` with a secure random string
+4. Update API URLs if not using defaults
+
+### Configuration Files
 
 The platform uses JSON configuration files for customization:
 
@@ -385,10 +459,31 @@ Create comprehensive tests in `tests/test_my_optimization_agent.py`.
 ## 📚 Documentation
 
 - **API Documentation**: Available at `http://localhost:8000/docs` when running the server
+- **Authentication Guide**: See `docs/AUTHENTICATION.md` for detailed authentication setup
 - **Architecture Guide**: See `docs/architecture.md`
 - **Agent Development**: See `docs/agent_development.md`
 - **Deployment Guide**: See `DEPLOYMENT.md`
 - **Integration Summary**: See `INTEGRATION_SUMMARY.md`
+
+## 🔐 Authentication & Security
+
+The platform implements JWT-based authentication for all API endpoints and WebSocket connections.
+
+### Key Features
+- **JWT Token Authentication**: Secure token-based authentication
+- **Protected Routes**: Frontend routes require authentication
+- **Session Management**: Automatic token refresh and expiration handling
+- **Role-Based Access**: Admin and user roles with different permissions
+- **Secure WebSocket**: Authenticated real-time connections
+
+### Common Authentication Issues
+
+See `docs/AUTHENTICATION.md` for detailed troubleshooting, including:
+- Login failures and credential issues
+- Token expiration and refresh problems
+- WebSocket connection authentication
+- CORS and network configuration
+- Session persistence issues
 
 ## 🚀 Deployment
 

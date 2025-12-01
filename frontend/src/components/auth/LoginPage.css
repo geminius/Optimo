@@ -1,0 +1,242 @@
+/**
+ * LoginPage Styles
+ * 
+ * Responsive styling for the login page with centered layout,
+ * platform branding, and mobile-friendly design.
+ * Sub-task 5.4: Style login page
+ */
+
+/* Main container - centers the login form */
+.login-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 20px;
+}
+
+/* Content wrapper */
+.login-content {
+  width: 100%;
+  max-width: 420px;
+  animation: fadeIn 0.5s ease-in;
+}
+
+/* Header section with logo and title */
+.login-header {
+  text-align: center;
+  margin-bottom: 32px;
+  color: white;
+}
+
+.login-logo-icon {
+  font-size: 64px;
+  color: white;
+  margin-bottom: 16px;
+  display: block;
+  animation: float 3s ease-in-out infinite;
+}
+
+.login-title {
+  color: white !important;
+  margin-bottom: 8px !important;
+  font-weight: 600;
+}
+
+.login-subtitle {
+  color: rgba(255, 255, 255, 0.9) !important;
+  font-size: 15px;
+}
+
+/* Login card */
+.login-card {
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+}
+
+.login-card .ant-card-body {
+  padding: 40px 32px;
+}
+
+/* Form styling */
+.login-card .ant-form-item {
+  margin-bottom: 20px;
+}
+
+.login-card .ant-input-affix-wrapper,
+.login-card .ant-input {
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.login-card .ant-input-affix-wrapper:focus,
+.login-card .ant-input-affix-wrapper-focused {
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+}
+
+.login-card .ant-btn-primary {
+  height: 48px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 500;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  transition: all 0.3s ease;
+}
+
+.login-card .ant-btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+.login-card .ant-btn-primary:active {
+  transform: translateY(0);
+}
+
+/* Checkbox styling */
+.login-card .ant-checkbox-wrapper {
+  color: #666;
+}
+
+.login-card .ant-checkbox-checked .ant-checkbox-inner {
+  background-color: #667eea;
+  border-color: #667eea;
+}
+
+/* Footer section */
+.login-footer {
+  text-align: center;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
+}
+
+/* Platform information */
+.login-info {
+  text-align: center;
+  margin-top: 24px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  backdrop-filter: blur(10px);
+}
+
+.login-info .ant-typography {
+  color: rgba(255, 255, 255, 0.9) !important;
+  line-height: 1.6;
+}
+
+/* Alert styling */
+.login-card .ant-alert {
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* Responsive design for mobile devices - Sub-task 5.4 */
+@media (max-width: 768px) {
+  .login-container {
+    padding: 16px;
+  }
+
+  .login-content {
+    max-width: 100%;
+  }
+
+  .login-card .ant-card-body {
+    padding: 32px 24px;
+  }
+
+  .login-logo-icon {
+    font-size: 48px;
+  }
+
+  .login-title {
+    font-size: 20px !important;
+  }
+
+  .login-subtitle {
+    font-size: 14px;
+  }
+
+  .login-info {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .login-card .ant-card-body {
+    padding: 24px 20px;
+  }
+
+  .login-logo-icon {
+    font-size: 40px;
+    margin-bottom: 12px;
+  }
+
+  .login-title {
+    font-size: 18px !important;
+  }
+
+  .login-subtitle {
+    font-size: 13px;
+  }
+
+  .login-card .ant-btn-primary {
+    height: 44px;
+    font-size: 15px;
+  }
+}
+
+/* Loading state */
+.login-card .ant-btn-loading {
+  opacity: 0.8;
+}
+
+/* Input focus states */
+.login-card .ant-input:focus,
+.login-card .ant-input-focused {
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+}
+
+/* Error state styling */
+.login-card .ant-form-item-has-error .ant-input,
+.login-card .ant-form-item-has-error .ant-input-affix-wrapper {
+  border-color: #ff4d4f;
+}
+
+.login-card .ant-form-item-has-error .ant-input:focus,
+.login-card .ant-form-item-has-error .ant-input-affix-wrapper:focus {
+  border-color: #ff4d4f;
+  box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.1);
+}
+
+/* Validation error messages */
+.login-card .ant-form-item-explain-error {
+  font-size: 13px;
+  margin-top: 4px;
+}

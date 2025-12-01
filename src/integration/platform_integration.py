@@ -143,6 +143,18 @@ class PlatformIntegrator:
             raise RuntimeError("Platform not initialized or model store not available")
         return self.model_store
     
+    def get_memory_manager(self) -> MemoryManager:
+        """Get the memory manager instance."""
+        if not self.is_initialized or not self.memory_manager:
+            raise RuntimeError("Platform not initialized or memory manager not available")
+        return self.memory_manager
+    
+    def get_notification_service(self) -> NotificationService:
+        """Get the notification service instance."""
+        if not self.is_initialized or not self.notification_service:
+            raise RuntimeError("Platform not initialized or notification service not available")
+        return self.notification_service
+    
     def get_platform_status(self) -> Dict[str, Any]:
         """Get comprehensive platform status."""
         status = {
