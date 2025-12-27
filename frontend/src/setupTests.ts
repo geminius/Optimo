@@ -20,7 +20,7 @@ Object.defineProperty(window, 'matchMedia', {
   configurable: true,
   value: jest.fn().mockImplementation(query => {
     const listeners: Array<(e: any) => void> = [];
-    return {
+    const mediaQueryList = {
       matches: query === '(min-width: 768px)', // Default to desktop
       media: query,
       onchange: null,
@@ -51,7 +51,24 @@ Object.defineProperty(window, 'matchMedia', {
         return true;
       }),
     };
+    return mediaQueryList;
   }),
+});
+
+// Mock Ant Design's responsive observer breakpoints
+const mockBreakpoints = {
+  xs: '(max-width: 575px)',
+  sm: '(min-width: 576px)',
+  md: '(min-width: 768px)',
+  lg: '(min-width: 992px)',
+  xl: '(min-width: 1200px)',
+  xxl: '(min-width: 1600px)',
+};
+
+// Ensure all breakpoints return proper MediaQueryList objects
+Object.keys(mockBreakpoints).forEach(breakpoint => {
+  const query = mockBreakpoints[breakpoint as keyof typeof mockBreakpoints];
+  window.matchMedia(query);
 });
 
 // Mock window.screen for responsive observer
@@ -67,7 +84,27 @@ Object.defineProperty(window, 'screen', {
 Object.defineProperty(window, 'getComputedStyle', {
   writable: true,
   value: jest.fn().mockImplementation(() => ({
-    getPropertyValue: jest.fn(),
+    getPropertyValue: jest.fn((prop: string) => {
+      // Mock CSS properties that Ant Design components might need
+      const mockValues: Record<string, string> = {
+        'scrollbar-color': 'auto',
+        'scrollbar-width': 'auto',
+        'overflow': 'visible',
+        'display': 'block',
+        'position': 'static',
+        'width': '100px',
+        'height': '100px',
+      };
+      return mockValues[prop] || '';
+    }),
+    // Add common CSS properties that might be accessed directly
+    scrollbarColor: 'auto',
+    scrollbarWidth: 'auto',
+    overflow: 'visible',
+    display: 'block',
+    position: 'static',
+    width: '100px',
+    height: '100px',
   })),
 });
 
@@ -105,6 +142,24 @@ jest.mock('antd', () => {
   };
 });
 
+// Mock Ant Design's responsive observer to prevent breakpoint issues
+jest.mock('antd/lib/_util/responsiveObserve', () => ({
+  __esModule: true,
+  default: {
+    subscribe: jest.fn(() => 'mock-token'),
+    unsubscribe: jest.fn(),
+    register: jest.fn(),
+    responsiveMap: {
+      xs: '(max-width: 575px)',
+      sm: '(min-width: 576px)',
+      md: '(min-width: 768px)',
+      lg: '(min-width: 992px)',
+      xl: '(min-width: 1200px)',
+      xxl: '(min-width: 1600px)',
+    },
+  },
+}));
+
 // Mock recharts to avoid canvas issues in tests
 jest.mock('recharts', () => {
   const React = require('react');
@@ -120,6 +175,27 @@ jest.mock('recharts', () => {
     Bar: () => React.createElement('div', { 'data-testid': 'bar' }),
   };
 });
+
+// Mock rc-table to prevent scrollbar measurement issues
+jest.mock('rc-table', () => {
+  const React = require('react');
+  return {
+    __esModule: true,
+    default: ({ columns, dataSource, children }: any) => {
+      return React.createElement('div', { 'data-testid': 'rc-table' }, 
+        React.createElement('div', null, 'Mocked Table'),
+        children
+      );
+    },
+  };
+});
+
+// Mock rc-util's getScrollBarSize to prevent CSS issues
+jest.mock('rc-util/lib/getScrollBarSize', () => ({
+  __esModule: true,
+  default: jest.fn(() => 17), // Standard scrollbar width
+  getTargetScrollBarSize: jest.fn(() => 17), // Also mock the named export
+}));
 
 // Increase timeout for async operations
 jest.setTimeout(10000);

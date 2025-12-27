@@ -825,7 +825,14 @@ class OptimizationManager:
     ) -> Dict[str, Any]:
         """Execute optimization phase with graceful degradation and recovery."""
         # Extract techniques from plan steps
-        original_techniques = [step.technique for step in optimization_plan.steps]
+        # Handle both dict and object formats for backward compatibility
+        if isinstance(optimization_plan, dict):
+            # Legacy format: {"techniques": ["quantization", "pruning"]}
+            original_techniques = optimization_plan.get("techniques", [])
+        else:
+            # Object format with .steps attribute
+            original_techniques = [step.technique for step in optimization_plan.steps]
+        
         failed_techniques = []
         
         # Try the original plan first
@@ -864,8 +871,16 @@ class OptimizationManager:
             self.logger.info(f"Attempting graceful degradation with techniques: {degraded_techniques}")
             
             # Create degraded plan by filtering steps
-            degraded_steps = [step for step in optimization_plan.steps if step.technique in degraded_techniques]
-            degraded_plan = replace(optimization_plan, steps=degraded_steps)
+            if isinstance(optimization_plan, dict):
+                # Legacy format: create new dict with filtered techniques
+                degraded_plan = {
+                    **optimization_plan,
+                    "techniques": degraded_techniques
+                }
+            else:
+                # Object format: filter steps and create new plan
+                degraded_steps = [step for step in optimization_plan.steps if step.technique in degraded_techniques]
+                degraded_plan = replace(optimization_plan, steps=degraded_steps)
             
             try:
                 result = self._execute_optimization_phase(session_id, model_path, degraded_plan)
@@ -883,11 +898,24 @@ class OptimizationManager:
                 
                 if recovery_manager.handle_error(final_error, recovery_context):
                     # Last attempt with minimal optimization - use first step only
-                    if optimization_plan.steps:
-                        minimal_plan = replace(optimization_plan, steps=[optimization_plan.steps[0]])
-                        return self._execute_optimization_phase(session_id, model_path, minimal_plan)
+                    if isinstance(optimization_plan, dict):
+                        # Legacy format: use first technique only
+                        techniques = optimization_plan.get("techniques", [])
+                        if techniques:
+                            minimal_plan = {
+                                **optimization_plan,
+                                "techniques": [techniques[0]]
+                            }
+                            return self._execute_optimization_phase(session_id, model_path, minimal_plan)
+                        else:
+                            raise final_error
                     else:
-                        raise final_error
+                        # Object format: use first step only
+                        if optimization_plan.steps:
+                            minimal_plan = replace(optimization_plan, steps=[optimization_plan.steps[0]])
+                            return self._execute_optimization_phase(session_id, model_path, minimal_plan)
+                        else:
+                            raise final_error
                 else:
                     raise final_error
     

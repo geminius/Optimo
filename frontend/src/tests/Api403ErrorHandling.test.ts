@@ -9,28 +9,39 @@
  * - Requirement 7.4: Show "You don't have permission" message
  */
 
-// Mock ErrorHandler.showError BEFORE imports
-jest.mock('../utils/errorHandler', () => ({
-  __esModule: true,
-  default: {
-    showError: jest.fn(),
-    showSuccess: jest.fn(),
-    showInfo: jest.fn(),
-    parseError: jest.fn(() => ({ type: 'AUTHORIZATION' })),
-  },
-  ERROR_MESSAGES: {
-    AUTH_TOKEN_EXPIRED: 'Session expired, please log in again',
-    AUTH_INSUFFICIENT_PERMISSIONS: "You don't have permission to perform this action",
-    SERVER_ERROR: 'Server error, please try again',
-    NETWORK_CONNECTION_FAILED: 'Unable to connect to server',
-  },
-}));
-
 import axios from 'axios';
 import MockAdapter from 'axios-mock-adapter';
 import AuthService from '../services/auth';
 import { User } from '../types/auth';
+
+// Mock ErrorHandler with proper implementation
+jest.mock('../utils/errorHandler', () => {
+  const mockShowError = jest.fn();
+  const mockParseError = jest.fn(() => ({ type: 'AUTHORIZATION' }));
+  
+  return {
+    __esModule: true,
+    default: {
+      showError: mockShowError,
+      showSuccess: jest.fn(),
+      showInfo: jest.fn(),
+      parseError: mockParseError,
+    },
+    ERROR_MESSAGES: {
+      AUTH_TOKEN_EXPIRED: 'Session expired, please log in again',
+      AUTH_INSUFFICIENT_PERMISSIONS: "You don't have permission to perform this action",
+      SERVER_ERROR: 'Server error, please try again',
+      NETWORK_CONNECTION_FAILED: 'Unable to connect to server',
+    },
+  };
+});
+
+// Import ErrorHandler after mocking
 import ErrorHandler from '../utils/errorHandler';
+
+// Get the mocked functions
+const mockShowError = (ErrorHandler.showError as jest.Mock);
+const mockParseError = (ErrorHandler.parseError as jest.Mock);
 
 // Create a mock location object
 const mockLocation = {
@@ -81,30 +92,30 @@ testApi.interceptors.response.use(
     if (axios.isAxiosError(error)) {
       if (error.response?.status === 401) {
         AuthService.removeToken();
-        ErrorHandler.showError({
-          type: ErrorHandler.parseError(error).type,
+        mockShowError({
+          type: mockParseError(error).type,
           message: 'Session expired, please log in again',
           statusCode: 401,
           originalError: error,
         });
         window.location.href = '/login';
       } else if (error.response?.status === 403) {
-        ErrorHandler.showError({
-          type: ErrorHandler.parseError(error).type,
+        mockShowError({
+          type: mockParseError(error).type,
           message: "You don't have permission to perform this action",
           statusCode: 403,
           originalError: error,
         });
       } else if (error.response?.status && error.response.status >= 500) {
-        ErrorHandler.showError({
-          type: ErrorHandler.parseError(error).type,
+        mockShowError({
+          type: mockParseError(error).type,
           message: 'Server error, please try again',
           statusCode: error.response.status,
           originalError: error,
         });
       } else if (!error.response) {
-        ErrorHandler.showError({
-          type: ErrorHandler.parseError(error).type,
+        mockShowError({
+          type: mockParseError(error).type,
           message: 'Unable to connect to server',
           originalError: error,
         });
@@ -131,6 +142,9 @@ describe('API 403 Forbidden Error Handling', () => {
     sessionStorage.clear();
     mockLocation.href = '';
     jest.clearAllMocks();
+    // Reset the mock functions
+    mockShowError.mockClear();
+    mockParseError.mockReturnValue({ type: 'AUTHORIZATION' });
   });
 
   afterAll(() => {
@@ -156,7 +170,7 @@ describe('API 403 Forbidden Error Handling', () => {
       }
 
       // Assert - Error message shown
-      expect(ErrorHandler.showError).toHaveBeenCalledWith(
+      expect(mockShowError).toHaveBeenCalledWith(
         expect.objectContaining({
           statusCode: 403,
           message: "You don't have permission to perform this action",
@@ -178,7 +192,7 @@ describe('API 403 Forbidden Error Handling', () => {
         // Expected
       }
 
-      expect(ErrorHandler.showError).toHaveBeenCalledWith(
+      expect(mockShowError).toHaveBeenCalledWith(
         expect.objectContaining({
           statusCode: 403,
           message: "You don't have permission to perform this action",
@@ -200,7 +214,7 @@ describe('API 403 Forbidden Error Handling', () => {
         // Expected
       }
 
-      expect(ErrorHandler.showError).toHaveBeenCalledWith(
+      expect(mockShowError).toHaveBeenCalledWith(
         expect.objectContaining({
           statusCode: 403,
           message: "You don't have permission to perform this action",
@@ -222,7 +236,7 @@ describe('API 403 Forbidden Error Handling', () => {
         // Expected
       }
 
-      expect(ErrorHandler.showError).toHaveBeenCalledWith(
+      expect(mockShowError).toHaveBeenCalledWith(
         expect.objectContaining({
           statusCode: 403,
           message: "You don't have permission to perform this action",
@@ -310,7 +324,7 @@ describe('API 403 Forbidden Error Handling', () => {
         // Expected
       }
 
-      expect(ErrorHandler.showError).toHaveBeenCalledTimes(1);
+      expect(mockShowError).toHaveBeenCalledTimes(1);
       expect(AuthService.getToken()).toBe(mockToken);
 
       // Second 403
@@ -320,7 +334,7 @@ describe('API 403 Forbidden Error Handling', () => {
         // Expected
       }
 
-      expect(ErrorHandler.showError).toHaveBeenCalledTimes(2);
+      expect(mockShowError).toHaveBeenCalledTimes(2);
       expect(AuthService.getToken()).toBe(mockToken);
       expect(mockLocation.href).toBe('');
     });
@@ -340,7 +354,7 @@ describe('API 403 Forbidden Error Handling', () => {
         // Expected
       }
 
-      const errorCall = (ErrorHandler.showError as jest.Mock).mock.calls[0][0];
+      const errorCall = mockShowError.mock.calls[0][0];
       expect(errorCall.message).toBe("You don't have permission to perform this action");
       expect(errorCall.statusCode).toBe(403);
     });

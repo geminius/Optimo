@@ -740,8 +740,15 @@ async def list_sessions(
                     "status": status_info["status"],
                     "progress_percentage": status_info["progress_percentage"],
                     "model_id": status_info["session_data"]["model_id"],
+                    "model_name": status_info["session_data"].get("model_name", f"Model {session_id}"),
+                    "techniques": status_info["session_data"].get("techniques", []),
+                    "size_reduction_percent": status_info["session_data"].get("size_reduction_percent"),
+                    "speed_improvement_percent": status_info["session_data"].get("speed_improvement_percent"),
                     "start_time": status_info["start_time"],
-                    "last_update": status_info["last_update"]
+                    "last_update": status_info["last_update"],
+                    "created_at": status_info["session_data"].get("created_at", status_info["start_time"]),
+                    "updated_at": status_info["session_data"].get("updated_at", status_info["last_update"]),
+                    "completed_at": status_info["session_data"].get("completed_at")
                 })
             except Exception as e:
                 logger.warning(f"Failed to get status for session {session_id}: {e}")

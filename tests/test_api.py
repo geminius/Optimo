@@ -337,12 +337,31 @@ class TestSessionEndpoints:
         mock_state.optimization_manager = mock_optimization_manager
         mock_optimization_manager.get_active_sessions.return_value = ["session1", "session2"]
         
+        # Mock get_session_status to return different data for each session
+        def mock_get_session_status(session_id):
+            return {
+                "status": "running" if session_id == "session1" else "completed",
+                "progress_percentage": 50.0 if session_id == "session1" else 100.0,
+                "start_time": "2024-01-01T00:00:00",
+                "last_update": "2024-01-01T00:30:00",
+                "session_data": {
+                    "model_id": f"model-{session_id}",
+                    "model_name": f"test-model-{session_id}",
+                    "created_at": "2024-01-01T00:00:00",
+                    "updated_at": "2024-01-01T00:30:00"
+                }
+            }
+        
+        mock_optimization_manager.get_session_status.side_effect = mock_get_session_status
+        
         response = client.get("/sessions", headers=auth_headers)
         
         assert response.status_code == 200
         data = response.json()
         assert "sessions" in data
         assert "total" in data
+        assert data["total"] == 2
+        assert len(data["sessions"]) == 2
     
     @patch('src.api.main.app.state')
     def test_cancel_session(self, mock_state, client, auth_headers, mock_optimization_manager):

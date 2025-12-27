@@ -64,10 +64,10 @@ describe('AuthService', () => {
       // Assert
       expect(mockedAxios.post).toHaveBeenCalledWith(
         'http://localhost:8000/auth/login',
-        expect.any(URLSearchParams),
+        { username: 'testuser', password: 'password123' },
         expect.objectContaining({
           headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Type': 'application/json',
           },
         })
       );
@@ -97,7 +97,7 @@ describe('AuthService', () => {
       await expect(AuthService.login('testuser', 'password123')).rejects.toThrow();
     });
 
-    it('should send credentials as form data', async () => {
+    it('should send credentials as JSON data', async () => {
       // Arrange
       mockedAxios.post.mockResolvedValue({ data: mockLoginResponse });
 
@@ -106,9 +106,17 @@ describe('AuthService', () => {
 
       // Assert
       const callArgs = mockedAxios.post.mock.calls[0];
-      const formData = callArgs[1] as URLSearchParams;
-      expect(formData.get('username')).toBe('testuser');
-      expect(formData.get('password')).toBe('password123');
+      const requestData = callArgs[1];
+      
+      // Check that it's a plain object with the right data
+      expect(requestData).toEqual({
+        username: 'testuser',
+        password: 'password123'
+      });
+      
+      // Check headers
+      const config = callArgs[2];
+      expect(config.headers['Content-Type']).toBe('application/json');
     });
   });
 
