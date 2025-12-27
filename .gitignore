@@ -190,7 +190,16 @@ test_storage/
 # Configuration files with secrets
 .env.local
 .env.production
+.env.development
+.env.test
 config/secrets.json
+
+# API keys and credentials
+*api_key*
+*credentials*
+*.key
+*.pem
+*.p12
 
 # Frontend test reports
 frontend/coverage/

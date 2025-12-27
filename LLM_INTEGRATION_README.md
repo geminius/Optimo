@@ -19,7 +19,7 @@ Add these variables to your `.env` file:
 
 ```bash
 # NVIDIA NIM Configuration (OpenAI-compatible)
-OPENAI_API_KEY=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
+OPENAI_API_KEY=nvapi-your-api-key-here
 OPENAI_BASE_URL=https://integrate.api.nvidia.com/v1
 LLM_MODEL=deepseek-ai/deepseek-v3.2
 
