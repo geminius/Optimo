@@ -1,329 +1,415 @@
 """
-Shared utility functions for model operations.
+Model utility functions for the robotics optimization platform.
 
-This module provides common functionality used across multiple agents
-to avoid code duplication and ensure consistency.
+This module provides utility functions for model handling, input generation,
+memory monitoring, and other model-related operations.
 """
 
 import torch
 import torch.nn as nn
-from typing import Tuple, Optional
-from pathlib import Path
-import logging
 import psutil
+import logging
+from typing import Tuple, Optional, Dict, Any, List
+import numpy as np
+
 
 logger = logging.getLogger(__name__)
 
 
 def find_compatible_input(model: torch.nn.Module, device: torch.device) -> torch.Tensor:
     """
-    Find a compatible input shape for the model.
+    Find a compatible input tensor for the given model.
     
-    This function attempts multiple strategies to determine the correct input shape:
-    1. Infer from the first leaf layer (Linear or Conv)
-    2. Try common input shapes
-    3. Raise an error if nothing works
+    This function attempts to determine the expected input shape for a model
+    by analyzing its first layer or using common defaults for robotics models.
     
     Args:
-        model: PyTorch model to find input for
+        model: PyTorch model to analyze
         device: Device to create tensor on
         
     Returns:
-        torch.Tensor: Compatible input tensor
-        
-    Raises:
-        ValueError: If no compatible input shape can be found
+        Compatible input tensor
     """
-    # First, try to infer input size from first leaf layer
     try:
-        for name, module in model.named_modules():
-            if len(list(module.children())) == 0:  # Leaf module
-                if hasattr(module, 'in_features'):
-                    # Linear layer - try 1D input
-                    input_size = module.in_features
-                    dummy_input = torch.randn(1, input_size).to(device)
-                    with torch.no_grad():
-                        _ = model(dummy_input)
-                    logger.info(f"Found compatible input shape from first layer: (1, {input_size})")
-                    return dummy_input
-                elif hasattr(module, 'in_channels'):
-                    # Conv layer - try different input shapes based on layer type
-                    in_channels = module.in_channels
-                    
-                    # Check if it's Conv1d, Conv2d, or Conv3d
-                    if isinstance(module, nn.Conv1d):
-                        # Conv1D - try sequence input
-                        dummy_input = torch.randn(1, in_channels, 100).to(device)
-                        with torch.no_grad():
-                            _ = model(dummy_input)
-                        logger.info(f"Found compatible Conv1D input shape: (1, {in_channels}, 100)")
-                        return dummy_input
-                    elif isinstance(module, nn.Conv3d):
-                        # Conv3D - try video input
-                        dummy_input = torch.randn(1, in_channels, 16, 112, 112).to(device)
-                        with torch.no_grad():
-                            _ = model(dummy_input)
-                        logger.info(f"Found compatible Conv3D input shape: (1, {in_channels}, 16, 112, 112)")
-                        return dummy_input
-                    else:
-                        # Conv2D - try image input
-                        dummy_input = torch.randn(1, in_channels, 224, 224).to(device)
-                        with torch.no_grad():
-                            _ = model(dummy_input)
-                        logger.info(f"Found compatible Conv2D input shape: (1, {in_channels}, 224, 224)")
-                        return dummy_input
-                break  # Only check first leaf layer
+        # Try to find the first layer that expects input
+        first_layer = None
+        for module in model.modules():
+            if isinstance(module, (nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+                first_layer = module
+                break
+        
+        if first_layer is not None:
+            if isinstance(first_layer, nn.Linear):
+                # Linear layer - create 1D input
+                batch_size = 1
+                input_features = first_layer.in_features
+                return torch.randn(batch_size, input_features).to(device)
+            
+            elif isinstance(first_layer, nn.Conv2d):
+                # 2D Convolution - create image-like input
+                batch_size = 1
+                in_channels = first_layer.in_channels
+                # Use common image sizes for robotics (224x224 is common for vision models)
+                height, width = 224, 224
+                return torch.randn(batch_size, in_channels, height, width).to(device)
+            
+            elif isinstance(first_layer, nn.Conv1d):
+                # 1D Convolution - create sequence input
+                batch_size = 1
+                in_channels = first_layer.in_channels
+                sequence_length = 100  # Default sequence length
+                return torch.randn(batch_size, in_channels, sequence_length).to(device)
+            
+            elif isinstance(first_layer, nn.Conv3d):
+                # 3D Convolution - create volume input
+                batch_size = 1
+                in_channels = first_layer.in_channels
+                depth, height, width = 16, 64, 64  # Default 3D dimensions
+                return torch.randn(batch_size, in_channels, depth, height, width).to(device)
+        
+        # Fallback: try common robotics model input shapes
+        common_shapes = [
+            (1, 3, 224, 224),    # RGB image (224x224)
+            (1, 3, 256, 256),    # RGB image (256x256)
+            (1, 1, 224, 224),    # Grayscale image
+            (1, 512),            # Feature vector
+            (1, 1024),           # Larger feature vector
+            (1, 100, 512),       # Sequence input
+            (1, 3, 480, 640),    # Camera resolution
+        ]
+        
+        for shape in common_shapes:
+            try:
+                test_input = torch.randn(shape).to(device)
+                # Try a forward pass to see if it works
+                model.eval()
+                with torch.no_grad():
+                    _ = model(test_input)
+                logger.info(f"Found compatible input shape: {shape}")
+                return test_input
+            except Exception:
+                continue
+        
+        # Last resort: create a simple 1D input
+        logger.warning("Could not determine input shape, using default 1D input")
+        return torch.randn(1, 100).to(device)
+        
     except Exception as e:
-        logger.debug(f"Could not infer from first layer: {e}")
-    
-    # Try common input shapes
-    common_shapes = [
-        (1, 3, 224, 224),   # Standard image (Conv2D)
-        (1, 3, 256, 256),   # Larger image
-        (1, 1, 28, 28),     # MNIST-like
-        (1, 512),           # 1D input (Linear)
-        (1, 1024),          # Larger 1D input
-        (1, 1280),          # VLA models
-        (1, 1000),          # Common large input
-        (1, 2048),          # Very large input
-        (1, 768),           # BERT-like
-        # Add Conv1D shapes
-        (1, 1, 100),        # Conv1D: (batch, channels, seq_len)
-        (1, 3, 100),        # Conv1D with 3 channels
-        (1, 16, 100),       # Conv1D with 16 channels
-        (1, 32, 256),       # Conv1D larger
-        (1, 64, 512),       # Conv1D even larger
-        # Add Conv3D shapes
-        (1, 3, 16, 112, 112),  # Video input
-        # Add sequence shapes for RNNs
-        (1, 100, 128),      # (batch, seq_len, features) for LSTM/GRU
-        (1, 50, 256),       # Shorter sequence
-        (1, 200, 64),       # Different sequence dimensions
-    ]
-    
-    for shape in common_shapes:
-        try:
-            dummy_input = torch.randn(shape).to(device)
-            with torch.no_grad():
-                _ = model(dummy_input)
-            logger.info(f"Found compatible input shape: {shape}")
-            return dummy_input
-        except Exception:
-            continue
-    
-    # If nothing works, try a fallback approach with a basic tensor
-    # This handles models with very specific input requirements
-    logger.warning("No common input shapes worked, trying fallback approach")
-    
-    # Try a few more unusual shapes that might work for edge cases
-    fallback_shapes = [
-        (1, 7, 13, 17),     # Specific unusual shape from test
-        (1, 4, 32, 32),     # Small square
-        (1, 8, 64, 64),     # Medium square
-        (1, 16, 16, 16),    # Cubic
-        (1, 5, 10, 20),     # Rectangular
-        (1, 2, 50, 50),     # Different aspect ratio
-    ]
-    
-    for shape in fallback_shapes:
-        try:
-            dummy_input = torch.randn(shape).to(device)
-            with torch.no_grad():
-                _ = model(dummy_input)
-            logger.info(f"Found compatible input shape with fallback: {shape}")
-            return dummy_input
-        except Exception:
-            continue
-    
-    # Final fallback - return a basic tensor and let the caller handle the error
-    # This ensures we always return a tensor, even if it might not work
-    logger.warning("All input shape attempts failed, returning basic fallback tensor")
-    fallback_input = torch.randn(1, 3, 32, 32).to(device)
-    return fallback_input
+        logger.error(f"Error finding compatible input: {e}")
+        # Emergency fallback
+        return torch.randn(1, 100).to(device)
 
 
 def get_memory_usage() -> float:
     """
     Get current memory usage in MB.
     
-    Returns GPU memory if available, otherwise system memory.
+    Returns GPU memory usage if CUDA is available, otherwise system RAM usage.
     
     Returns:
-        float: Memory usage in MB
+        Memory usage in MB
     """
-    if torch.cuda.is_available():
-        return torch.cuda.memory_allocated() / (1024 * 1024)
-    else:
-        process = psutil.Process()
-        return process.memory_info().rss / (1024 * 1024)
+    try:
+        if torch.cuda.is_available():
+            # Get GPU memory usage
+            memory_allocated = torch.cuda.memory_allocated() / (1024 * 1024)  # Convert to MB
+            return memory_allocated
+        else:
+            # Get system RAM usage
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            return memory_info.rss / (1024 * 1024)  # Convert to MB
+            
+    except Exception as e:
+        logger.warning(f"Failed to get memory usage: {e}")
+        return 0.0
 
 
-def count_parameters(model: torch.nn.Module) -> int:
+def get_model_summary(model: torch.nn.Module) -> Dict[str, Any]:
     """
-    Count total number of parameters in the model.
+    Get a summary of model architecture and parameters.
+    
+    Args:
+        model: PyTorch model to analyze
+        
+    Returns:
+        Dictionary containing model summary information
+    """
+    try:
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        
+        # Calculate model size in MB
+        param_size = 0
+        buffer_size = 0
+        
+        for param in model.parameters():
+            param_size += param.nelement() * param.element_size()
+        
+        for buffer in model.buffers():
+            buffer_size += buffer.nelement() * buffer.element_size()
+        
+        total_size_mb = (param_size + buffer_size) / (1024 * 1024)
+        
+        # Count layers by type
+        layer_counts = {}
+        for name, module in model.named_modules():
+            module_type = type(module).__name__
+            layer_counts[module_type] = layer_counts.get(module_type, 0) + 1
+        
+        return {
+            "total_parameters": total_params,
+            "trainable_parameters": trainable_params,
+            "non_trainable_parameters": total_params - trainable_params,
+            "model_size_mb": total_size_mb,
+            "parameter_size_mb": param_size / (1024 * 1024),
+            "buffer_size_mb": buffer_size / (1024 * 1024),
+            "layer_counts": layer_counts
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get model summary: {e}")
+        return {
+            "total_parameters": 0,
+            "trainable_parameters": 0,
+            "non_trainable_parameters": 0,
+            "model_size_mb": 0.0,
+            "parameter_size_mb": 0.0,
+            "buffer_size_mb": 0.0,
+            "layer_counts": {},
+            "error": str(e)
+        }
+
+
+def estimate_model_flops(model: torch.nn.Module, input_tensor: torch.Tensor) -> int:
+    """
+    Estimate the number of FLOPs (Floating Point Operations) for a model.
+    
+    This is a simplified estimation based on layer types and sizes.
     
     Args:
         model: PyTorch model
+        input_tensor: Sample input tensor
         
     Returns:
-        int: Total number of parameters
+        Estimated FLOPs
     """
-    return sum(p.numel() for p in model.parameters())
+    try:
+        total_flops = 0
+        
+        def flop_count_hook(module, input, output):
+            nonlocal total_flops
+            
+            if isinstance(module, nn.Linear):
+                # Linear layer: input_features * output_features
+                flops = module.in_features * module.out_features
+                if module.bias is not None:
+                    flops += module.out_features
+                total_flops += flops
+            
+            elif isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+                # Convolution: output_elements * kernel_size * input_channels
+                if hasattr(module, 'weight') and module.weight is not None:
+                    kernel_flops = np.prod(module.kernel_size) * module.in_channels
+                    
+                    # Estimate output size
+                    if isinstance(output, torch.Tensor):
+                        output_elements = output.numel() // output.shape[0]  # Exclude batch dimension
+                    else:
+                        output_elements = 1000  # Fallback estimate
+                    
+                    flops = kernel_flops * output_elements
+                    if module.bias is not None:
+                        flops += output_elements
+                    total_flops += flops
+            
+            elif isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+                # BatchNorm: 2 operations per element (normalize + scale/shift)
+                if isinstance(output, torch.Tensor):
+                    total_flops += output.numel() * 2
+            
+            elif isinstance(module, (nn.ReLU, nn.LeakyReLU, nn.GELU, nn.Sigmoid, nn.Tanh)):
+                # Activation functions: 1 operation per element
+                if isinstance(output, torch.Tensor):
+                    total_flops += output.numel()
+        
+        # Register hooks
+        hooks = []
+        for module in model.modules():
+            hook = module.register_forward_hook(flop_count_hook)
+            hooks.append(hook)
+        
+        # Run forward pass
+        model.eval()
+        with torch.no_grad():
+            _ = model(input_tensor)
+        
+        # Remove hooks
+        for hook in hooks:
+            hook.remove()
+        
+        return total_flops
+        
+    except Exception as e:
+        logger.error(f"Failed to estimate FLOPs: {e}")
+        return 0
 
 
-def count_trainable_parameters(model: torch.nn.Module) -> int:
+def validate_model_compatibility(model: torch.nn.Module, device: torch.device) -> Tuple[bool, List[str]]:
     """
-    Count number of trainable parameters in the model.
+    Validate that a model is compatible with the optimization platform.
     
     Args:
-        model: PyTorch model
+        model: PyTorch model to validate
+        device: Target device
         
     Returns:
-        int: Number of trainable parameters
+        Tuple of (is_compatible, list_of_issues)
     """
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-
-def calculate_model_depth(model: torch.nn.Module) -> int:
-    """
-    Calculate approximate model depth (number of nested layers).
-    
-    Args:
-        model: PyTorch model
-        
-    Returns:
-        int: Maximum depth of the model
-    """
-    max_depth = 0
-    
-    def calculate_depth(module, current_depth=0):
-        nonlocal max_depth
-        max_depth = max(max_depth, current_depth)
-        
-        for child in module.children():
-            calculate_depth(child, current_depth + 1)
-    
-    calculate_depth(model)
-    return max_depth
-
-
-def get_model_size_mb(model: torch.nn.Module) -> float:
-    """
-    Calculate model size in MB based on parameters.
-    
-    Assumes float32 (4 bytes per parameter).
-    
-    Args:
-        model: PyTorch model
-        
-    Returns:
-        float: Model size in MB
-    """
-    param_count = count_parameters(model)
-    return (param_count * 4) / (1024 * 1024)
-
-
-def load_model(
-    model_path: str, 
-    device: torch.device,
-    weights_only: bool = False
-) -> torch.nn.Module:
-    """
-    Load a PyTorch model from file.
-    
-    Args:
-        model_path: Path to the model file
-        device: Device to load model on
-        weights_only: If True, only load weights (more secure)
-        
-    Returns:
-        torch.nn.Module: Loaded model
-        
-    Raises:
-        FileNotFoundError: If model file doesn't exist
-        ValueError: If model format is unsupported
-        ImportError: If custom model class is not importable
-    """
-    path = Path(model_path)
-    
-    if not path.exists():
-        raise FileNotFoundError(f"Model file not found: {model_path}")
+    issues = []
     
     try:
-        # Try loading as PyTorch model
-        if path.suffix in ['.pt', '.pth']:
-            # Load model - custom classes must be importable via PYTHONPATH or sys.path
-            # For test models, ensure test_models is in sys.path before calling this
-            model = torch.load(model_path, map_location=device, weights_only=weights_only)
+        # Check if model can be moved to device
+        try:
+            model.to(device)
+        except Exception as e:
+            issues.append(f"Cannot move model to device {device}: {str(e)}")
+        
+        # Check if model can be set to eval mode
+        try:
+            model.eval()
+        except Exception as e:
+            issues.append(f"Cannot set model to eval mode: {str(e)}")
+        
+        # Check if we can find a compatible input
+        try:
+            input_tensor = find_compatible_input(model, device)
             
-            if isinstance(model, dict) and 'model' in model:
-                model = model['model']
-            elif isinstance(model, dict) and 'state_dict' in model:
-                # Need to reconstruct model architecture - this is a limitation
-                raise ValueError("State dict found but no model architecture")
-        else:
-            raise ValueError(f"Unsupported model format: {path.suffix}")
+            # Try a forward pass
+            with torch.no_grad():
+                output = model(input_tensor)
+            
+            if output is None:
+                issues.append("Model forward pass returns None")
+            
+        except Exception as e:
+            issues.append(f"Model forward pass failed: {str(e)}")
         
-        return model.to(device)
-        
-    except AttributeError as e:
-        # This typically happens when a custom model class isn't importable
-        if "Can't get attribute" in str(e):
-            logger.error(
-                f"Failed to load model: Custom model class not found. "
-                f"Ensure the model's class is importable (e.g., add its directory to sys.path "
-                f"or install the package). Error: {e}"
-            )
-            raise ImportError(
-                f"Model class not found. For custom models, ensure the class is importable. "
-                f"For test models, add 'test_models' to sys.path before loading. "
-                f"Original error: {e}"
-            ) from e
-        raise
-    except Exception as e:
-        logger.error(f"Failed to load model: {e}")
-        raise
-
-
-def get_layer_types(model: torch.nn.Module) -> dict:
-    """
-    Get count of each layer type in the model.
-    
-    Args:
-        model: PyTorch model
-        
-    Returns:
-        dict: Dictionary mapping layer type names to counts
-    """
-    layer_types = {}
-    
-    for name, module in model.named_modules():
-        if len(list(module.children())) == 0:  # Leaf modules only
+        # Check for unsupported layer types
+        unsupported_layers = []
+        for name, module in model.named_modules():
             module_type = type(module).__name__
-            layer_types[module_type] = layer_types.get(module_type, 0) + 1
-    
-    return layer_types
+            # Add any layer types that are known to be problematic
+            if module_type in ['CustomLayer', 'UnsupportedOp']:  # Example unsupported types
+                unsupported_layers.append(f"{name}: {module_type}")
+        
+        if unsupported_layers:
+            issues.append(f"Unsupported layer types found: {', '.join(unsupported_layers)}")
+        
+        # Check model size (warn if very large)
+        try:
+            summary = get_model_summary(model)
+            if summary.get("model_size_mb", 0) > 5000:  # 5GB
+                issues.append(f"Model is very large ({summary['model_size_mb']:.1f}MB), optimization may be slow")
+        except Exception:
+            pass
+        
+        return len(issues) == 0, issues
+        
+    except Exception as e:
+        issues.append(f"Validation failed with error: {str(e)}")
+        return False, issues
 
 
-def create_dummy_input(
-    model: torch.nn.Module, 
-    device: torch.device,
-    input_shape: Optional[Tuple[int, ...]] = None
-) -> torch.Tensor:
+def prepare_model_for_optimization(model: torch.nn.Module, device: torch.device) -> torch.nn.Module:
     """
-    Create dummy input for model testing.
-    
-    This is an alias for find_compatible_input for backward compatibility.
+    Prepare a model for optimization by applying common preprocessing steps.
     
     Args:
-        model: PyTorch model
-        device: Device to create tensor on
-        input_shape: Optional explicit input shape
+        model: PyTorch model to prepare
+        device: Target device
         
     Returns:
-        torch.Tensor: Dummy input tensor
+        Prepared model
     """
-    if input_shape is not None:
-        return torch.randn(input_shape).to(device)
+    try:
+        # Move to device and set to eval mode
+        model = model.to(device)
+        model.eval()
+        
+        # Disable gradient computation for all parameters
+        for param in model.parameters():
+            param.requires_grad = False
+        
+        # Apply any model-specific optimizations
+        # (This could include things like fusing batch norm, etc.)
+        
+        logger.info("Model prepared for optimization")
+        return model
+        
+    except Exception as e:
+        logger.error(f"Failed to prepare model for optimization: {e}")
+        raise
+
+
+def compare_model_outputs(
+    model1: torch.nn.Module, 
+    model2: torch.nn.Module, 
+    input_tensor: torch.Tensor,
+    tolerance: float = 1e-5
+) -> Dict[str, Any]:
+    """
+    Compare outputs of two models to check for consistency.
     
-    return find_compatible_input(model, device)
+    Args:
+        model1: First model
+        model2: Second model  
+        input_tensor: Input to test with
+        tolerance: Numerical tolerance for comparison
+        
+    Returns:
+        Dictionary with comparison results
+    """
+    try:
+        model1.eval()
+        model2.eval()
+        
+        with torch.no_grad():
+            output1 = model1(input_tensor)
+            output2 = model2(input_tensor)
+        
+        # Convert to numpy for easier comparison
+        if isinstance(output1, torch.Tensor):
+            out1_np = output1.cpu().numpy()
+        else:
+            out1_np = np.array(output1)
+            
+        if isinstance(output2, torch.Tensor):
+            out2_np = output2.cpu().numpy()
+        else:
+            out2_np = np.array(output2)
+        
+        # Calculate differences
+        abs_diff = np.abs(out1_np - out2_np)
+        max_diff = np.max(abs_diff)
+        mean_diff = np.mean(abs_diff)
+        
+        # Check if outputs are close
+        are_close = np.allclose(out1_np, out2_np, atol=tolerance)
+        
+        return {
+            "are_close": are_close,
+            "max_absolute_difference": float(max_diff),
+            "mean_absolute_difference": float(mean_diff),
+            "tolerance_used": tolerance,
+            "output1_shape": out1_np.shape,
+            "output2_shape": out2_np.shape,
+            "shapes_match": out1_np.shape == out2_np.shape
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to compare model outputs: {e}")
+        return {
+            "are_close": False,
+            "error": str(e)
+        }

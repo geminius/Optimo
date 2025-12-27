@@ -356,6 +356,10 @@ app.include_router(sessions_router)
 from .config import router as config_router
 app.include_router(config_router)
 
+# LLM service endpoints (validation and recommendations)
+from .llm_endpoints import router as llm_router
+app.include_router(llm_router)
+
 logger.info("All API routers registered successfully")
 
 # Global configuration
@@ -370,13 +374,24 @@ ALLOWED_EXTENSIONS = {".pt", ".pth", ".onnx", ".pb", ".h5", ".safetensors"}
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health_check():
     """Check API health status."""
+    from ..services.llm_service import llm_service
+    
+    # Check LLM service health
+    llm_health = None
+    try:
+        llm_health = await llm_service.health_check()
+    except Exception as e:
+        logger.warning(f"LLM health check failed: {e}")
+        llm_health = {"status": "error", "error": str(e)}
+    
     return HealthResponse(
         status="healthy",
         timestamp=datetime.now(),
         version="1.0.0",
         services={
             "optimization_manager": hasattr(app.state, 'optimization_manager'),
-            "upload_directory": UPLOAD_DIR.exists()
+            "upload_directory": UPLOAD_DIR.exists(),
+            "llm_service": llm_health.get("status") == "healthy" if llm_health else False
         }
     )
 

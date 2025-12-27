@@ -34,5 +34,15 @@
     "inference_time": 0.3,
     "model_size": 0.3
   },
-  "target_deployment": "general"
+  "target_deployment": "general",
+  "llm_service": {
+    "enabled": true,
+    "validation_enabled": true,
+    "confidence_threshold": 0.8,
+    "timeout_seconds": 30,
+    "max_retries": 3,
+    "cache_enabled": true,
+    "cache_ttl_seconds": 3600,
+    "max_tokens": 2048
+  }
 }

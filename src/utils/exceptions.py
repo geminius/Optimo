@@ -232,6 +232,78 @@ class NetworkError(PlatformError):
         )
 
 
+class NetworkError(PlatformError):
+    """Network-related errors."""
+    
+    def __init__(
+        self,
+        message: str,
+        endpoint: Optional[str] = None,
+        status_code: Optional[int] = None,
+        **kwargs
+    ):
+        context = kwargs.get('context', {})
+        if endpoint:
+            context['endpoint'] = endpoint
+        if status_code:
+            context['status_code'] = status_code
+        
+        super().__init__(
+            message=message,
+            category=ErrorCategory.NETWORK,
+            context=context,
+            **kwargs
+        )
+
+
+class LLMServiceError(PlatformError):
+    """Errors related to LLM service operations."""
+    
+    def __init__(
+        self,
+        message: str,
+        model: Optional[str] = None,
+        request_type: Optional[str] = None,
+        **kwargs
+    ):
+        context = kwargs.get('context', {})
+        if model:
+            context['model'] = model
+        if request_type:
+            context['request_type'] = request_type
+        
+        super().__init__(
+            message=message,
+            category=ErrorCategory.NETWORK,
+            context=context,
+            **kwargs
+        )
+
+
+class LLMValidationError(PlatformError):
+    """Errors during LLM-based validation."""
+    
+    def __init__(
+        self,
+        message: str,
+        validation_type: Optional[str] = None,
+        confidence_score: Optional[float] = None,
+        **kwargs
+    ):
+        context = kwargs.get('context', {})
+        if validation_type:
+            context['validation_type'] = validation_type
+        if confidence_score is not None:
+            context['confidence_score'] = confidence_score
+        
+        super().__init__(
+            message=message,
+            category=ErrorCategory.VALIDATION,
+            context=context,
+            **kwargs
+        )
+
+
 class StorageError(PlatformError):
     """Storage-related errors."""
     

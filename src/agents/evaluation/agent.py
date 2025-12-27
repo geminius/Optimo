@@ -3,7 +3,7 @@ Evaluation Agent implementation for robotics model optimization platform.
 
 This module provides the EvaluationAgent class that evaluates optimized models
 against benchmarks, compares performance with original models, and generates
-comprehensive evaluation reports.
+comprehensive evaluation reports with optional LLM-based validation.
 """
 
 import time
@@ -22,6 +22,8 @@ from ...models.core import (
     EvaluationReport, BenchmarkResult, PerformanceMetrics,
     ComparisonResult, ValidationStatus
 )
+from ...services.llm_service import llm_service, ValidationRequest
+from ...utils.exceptions import EvaluationError, LLMValidationError
 
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,10 @@ class EvaluationAgent(BaseEvaluationAgent):
         self.accuracy_threshold = config.get("accuracy_threshold", 0.95)  # 95% of original accuracy
         self.performance_threshold = config.get("performance_threshold", 1.1)  # 10% improvement
         self.timeout_seconds = config.get("timeout_seconds", 300)  # 5 minutes
+        
+        # LLM validation settings
+        self.llm_validation_enabled = config.get("llm_validation_enabled", True)
+        self.llm_confidence_threshold = config.get("llm_confidence_threshold", 0.8)
         
         # Built-in benchmark functions
         self._benchmark_registry = {
@@ -67,7 +73,7 @@ class EvaluationAgent(BaseEvaluationAgent):
         torch.cuda.empty_cache() if torch.cuda.is_available() else None
         logger.info("EvaluationAgent cleanup completed")
     
-    def evaluate_model(self, model: torch.nn.Module, 
+    async def evaluate_model(self, model: torch.nn.Module, 
                       benchmarks: List[Dict[str, Any]]) -> EvaluationReport:
         """
         Evaluate model performance against specified benchmarks.
@@ -107,10 +113,33 @@ class EvaluationAgent(BaseEvaluationAgent):
                 benchmark_results, validation_errors
             )
             
-            # Generate recommendations
-            recommendations = self._generate_evaluation_recommendations(
-                benchmark_results, performance_metrics
+            # Generate recommendations (including LLM-based if enabled)
+            recommendations = await self._generate_evaluation_recommendations_async(
+                benchmark_results, performance_metrics, validation_errors
             )
+            
+            # Perform LLM validation if enabled
+            llm_validation_result = None
+            if self.llm_validation_enabled and llm_service.is_available():
+                try:
+                    llm_validation_result = await self._perform_llm_validation(
+                        performance_metrics, benchmark_results
+                    )
+                    
+                    # Incorporate LLM recommendations
+                    if llm_validation_result and llm_validation_result.recommendations:
+                        recommendations.extend(llm_validation_result.recommendations)
+                    
+                    # Update validation status based on LLM assessment
+                    if (llm_validation_result and 
+                        not llm_validation_result.is_valid and 
+                        llm_validation_result.confidence_score >= self.llm_confidence_threshold):
+                        validation_status = ValidationStatus.FAILED
+                        validation_errors.extend(llm_validation_result.errors)
+                        
+                except Exception as e:
+                    logger.warning(f"LLM validation failed: {e}")
+                    recommendations.append(f"LLM validation unavailable: {str(e)}")
             
             evaluation_duration = time.time() - start_time
             
@@ -139,7 +168,7 @@ class EvaluationAgent(BaseEvaluationAgent):
                 evaluation_duration_seconds=time.time() - start_time
             )
     
-    def compare_models(self, original: torch.nn.Module, 
+    async def compare_models(self, original: torch.nn.Module, 
                       optimized: torch.nn.Module) -> ComparisonResult:
         """
         Compare performance between original and optimized models.
@@ -157,8 +186,8 @@ class EvaluationAgent(BaseEvaluationAgent):
             # Evaluate both models with standard benchmarks
             standard_benchmarks = self._get_standard_benchmarks()
             
-            original_report = self.evaluate_model(original, standard_benchmarks)
-            optimized_report = self.evaluate_model(optimized, standard_benchmarks)
+            original_report = await self.evaluate_model(original, standard_benchmarks)
+            optimized_report = await self.evaluate_model(optimized, standard_benchmarks)
             
             # Calculate improvements and regressions
             improvements = {}
@@ -222,7 +251,7 @@ class EvaluationAgent(BaseEvaluationAgent):
                 recommendation=f"Comparison failed: {str(e)}"
             )
     
-    def validate_performance(self, model: torch.nn.Module, 
+    async def validate_performance(self, model: torch.nn.Module, 
                            thresholds: Dict[str, float]) -> Dict[str, Any]:
         """
         Validate model performance against specified thresholds.
@@ -239,7 +268,7 @@ class EvaluationAgent(BaseEvaluationAgent):
         try:
             # Run evaluation with standard benchmarks
             benchmarks = self._get_standard_benchmarks()
-            report = self.evaluate_model(model, benchmarks)
+            report = await self.evaluate_model(model, benchmarks)
             
             validation_results = {
                 "passed": True,
@@ -713,3 +742,116 @@ class EvaluationAgent(BaseEvaluationAgent):
             {"name": "flops", "type": "flops"},
             {"name": "energy_efficiency", "type": "energy_efficiency"}
         ]
+    
+    async def _generate_evaluation_recommendations_async(
+        self, 
+        benchmark_results: List[BenchmarkResult],
+        performance_metrics: PerformanceMetrics,
+        validation_errors: List[str]
+    ) -> List[str]:
+        """Generate recommendations including LLM-based suggestions."""
+        # Start with standard recommendations
+        recommendations = self._generate_evaluation_recommendations(
+            benchmark_results, performance_metrics
+        )
+        
+        # Add LLM-generated recommendations if available
+        if self.llm_validation_enabled and llm_service.is_available():
+            try:
+                metrics_dict = asdict(performance_metrics)
+                benchmark_dict = {
+                    result.benchmark_name: {
+                        "score": result.score,
+                        "unit": result.unit,
+                        "execution_time": result.execution_time_seconds
+                    }
+                    for result in benchmark_results
+                }
+                
+                llm_recommendations = await llm_service.generate_recommendations(
+                    model_metrics=metrics_dict,
+                    optimization_config=benchmark_dict,
+                    context={
+                        "validation_errors": validation_errors,
+                        "platform": "robotics_optimization"
+                    }
+                )
+                
+                # Add LLM recommendations with prefix
+                for rec in llm_recommendations:
+                    recommendations.append(f"AI Insight: {rec}")
+                    
+            except Exception as e:
+                logger.warning(f"Failed to generate LLM recommendations: {e}")
+        
+        return recommendations
+    
+    async def _perform_llm_validation(
+        self,
+        performance_metrics: PerformanceMetrics,
+        benchmark_results: List[BenchmarkResult]
+    ) -> Optional[Any]:
+        """Perform LLM-based validation of optimization results."""
+        try:
+            # Prepare validation request
+            metrics_dict = asdict(performance_metrics)
+            
+            # Create optimization config from benchmark results
+            optimization_config = {
+                "benchmarks_run": len(benchmark_results),
+                "benchmark_results": {
+                    result.benchmark_name: {
+                        "score": result.score,
+                        "unit": result.unit,
+                        "higher_is_better": result.higher_is_better,
+                        "execution_time_seconds": result.execution_time_seconds
+                    }
+                    for result in benchmark_results
+                }
+            }
+            
+            # Add robotics-specific context
+            context = {
+                "platform": "robotics_model_optimization",
+                "deployment_target": "edge_devices",
+                "critical_constraints": {
+                    "max_inference_time_ms": 100,
+                    "min_accuracy_threshold": 0.95,
+                    "max_memory_usage_mb": 1000
+                },
+                "evaluation_timestamp": datetime.now().isoformat()
+            }
+            
+            validation_request = ValidationRequest(
+                validation_type="robotics_optimization_evaluation",
+                model_metrics=metrics_dict,
+                optimization_config=optimization_config,
+                context=context
+            )
+            
+            # Perform LLM validation
+            validation_result = await llm_service.validate_optimization_result(
+                validation_request
+            )
+            
+            logger.info(
+                f"LLM validation completed - Valid: {validation_result.is_valid}, "
+                f"Confidence: {validation_result.confidence_score:.2f}",
+                extra={
+                    "component": "EvaluationAgent",
+                    "llm_validation": True,
+                    "confidence": validation_result.confidence_score
+                }
+            )
+            
+            return validation_result
+            
+        except LLMValidationError as e:
+            logger.error(f"LLM validation error: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error during LLM validation: {e}")
+            raise LLMValidationError(
+                f"LLM validation failed: {str(e)}",
+                validation_type="robotics_optimization_evaluation"
+            )
